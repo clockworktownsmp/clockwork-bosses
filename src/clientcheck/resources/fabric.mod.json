@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "clockwork_bosses_clientcheck",
+  "version": "1",
+  "name": "Clockwork Bosses development client keyframe checks",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["clockwork.bosses.ClockworkBossClientChecks"],
+    "fabric-client-gametest": ["clockwork.bosses.ClockworkBossLootClientGameTest"]
+  },
+  "depends": {"clockwork_bosses": "*"}
+}

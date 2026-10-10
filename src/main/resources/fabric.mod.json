@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "clockwork_bosses",
+  "version": "${version}",
+  "name": "Clockwork Bosses",
+  "description": "Configurable boss encounters with phase effects, skins, scale and event sounds.",
+  "authors": [],
+  "contact": {},
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "clockwork.bosses.ClockworkBosses"
+    ],
+    "client": [
+      "clockwork.bosses.client.ClockworkBossesClient"
+    ]
+  },
+  "mixins": [
+    "clockwork_bosses.mixins.json",
+    {
+      "config": "clockwork_bosses.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "${minecraft_version}",
+    "java": ">=25",
+    "fabric-api": ">=${fabric_api_version}"
+  }
+}

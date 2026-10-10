@@ -1,0 +1,59 @@
+{
+  "type": "minecraft:entity",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:diamond"
+        }
+      ],
+      "condition": {
+        "type": "minecraft:all_of",
+        "terms": [
+          {
+            "type": "minecraft:killed_by_player"
+          },
+          {
+            "entity": "attacker",
+            "scores": {
+              "cw_loot_test": {
+                "min": 1,
+                "max": 1
+              }
+            },
+            "type": "minecraft:entity_scores"
+          }
+        ]
+      }
+    },
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:emerald"
+        }
+      ],
+      "condition": {
+        "type": "minecraft:all_of",
+        "terms": [
+          {
+            "type": "minecraft:killed_by_player"
+          },
+          {
+            "entity": "direct_attacker",
+            "scores": {
+              "cw_loot_test": {
+                "min": 2,
+                "max": 2
+              }
+            },
+            "type": "minecraft:entity_scores"
+          }
+        ]
+      }
+    }
+  ]
+}

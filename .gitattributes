@@ -1,0 +1,19 @@
+# Normalize source text across Windows and Linux; wrapper launchers use native endings.
+* text=auto
+*.java text eol=lf
+*.gradle text eol=lf
+*.properties text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+gradlew text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+
+# Build inputs must stay byte-for-byte intact.
+*.jar binary
+*.ogg binary
+*.png binary
+*.jpg binary
+*.jpeg binary

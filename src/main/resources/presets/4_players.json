@@ -1,0 +1,1246 @@
+// Clockwork Boss template: JSON with comments. 20 game ticks = 1 second.
+// Null phase overrides inherit base values; subphase overrides inherit their parent phase.
+// Empty sound filenames disable events; an empty roar filename uses the vanilla roar.
+// /boss reload applies edited settings to loaded bosses.
+{
+  // Template-wide item rewards, once on real death, including environmental deaths. Respects doMobLoot.
+  // Removal, reset and /kill do not pay. Empty entries give no custom rewards.
+  // enabled: false preserves existing drops. Reload applies saved settings to loaded bosses.
+  // source: entries opens the GUI reward editor; table uses a loaded datapack ID. Both are retained.
+  // entries: 0–32 independent item rewards; quantities 1–64 and chance 0–1 (GUI shows percent).
+  // loot_table: loaded datapack ID, used only with source=table; lowercase, no spaces.
+  // vanilla_drops: keep adds this table; replace skips the vanilla table. XP/equipment/mod drops stay native.
+  "loot": {
+    "enabled": false,
+    "loot_table": "",
+    "vanilla_drops": "keep",
+    "source": "entries",
+    "entries": {}
+  },
+  // Base texture; player colors use nearest-neighbor scaling. Only glow layers are tinted. Custom:
+  // 128x128 Warden atlas in this template folder's skins/, at most 512 KiB; sent to tracking clients.
+  // Install the same mod version on both sides.
+  // type: "player": account skin (blank name uses vanilla); "default": vanilla Warden; "custom": server
+  // PNG.
+  // name: Minecraft username for player skins; 1-16 letters, numbers or underscores.
+  // file: Lowercase PNG filename only, e.g. clockwork_warden.png; no spaces, capitals or directory path.
+  "skin": {
+    "type": "player",
+    "name": "",
+    "file": "",
+    // Top-left positions of the two 4x4 slanted eyebrow masks on the 16x16 head face. Coordinates are
+    // whole pixels 0-12; move eyebrows independently from the eyes. Missing settings keep the original
+    // positions. Preview face glow is brighter for alignment; fight brightness is unchanged.
+    // left_x: Left eyebrow X, 0-12; default 2.
+    // left_y: Left eyebrow Y, 0-12; default 2. Larger values move down.
+    // right_x: Right eyebrow X, 0-12; default 10.
+    // right_y: Right eyebrow Y, 0-12; default 2.
+    "glowing_eyebrows": {
+      "left_x": 2,
+      "left_y": 2,
+      "right_x": 10,
+      "right_y": 2
+    },
+    // Eye positions on the 16x16 front head face, measured in Warden atlas pixels from its top-left.
+    // Default eyes are 2x2 with one darker pupil; independent X/Y scales change their size; eyebrows use
+    // their separate position settings. Use the editor skin preview to align them. These coordinates
+    // affect only marked bosses.
+    // scale_x: Horizontal eye scale, 0.5-4; 1 = two pixels wide. Rounded to whole atlas pixels (1-8)
+    // without blur. Both eyes share the width; Y scale is independent.
+    // scale_y: Vertical eye scale, 0.5-4; 1 = two pixels tall. Rounded to whole atlas pixels (1-8) without
+    // blur. Both eyes share the height; X scale is independent.
+    // left_x: Left eye horizontal position, whole number 0-15; default 3. The rendered position is clamped
+    // so the scaled eye fits on the face. One step = one atlas pixel.
+    // left_y: Left eye vertical position, whole number 0-15; default 7. The rendered position is clamped
+    // so the scaled eye fits on the face. Larger values move down.
+    // right_x: Right eye horizontal position, whole number 0-15; default 11. The rendered position is
+    // clamped so the scaled eye fits on the face.
+    // right_y: Right eye vertical position, whole number 0-15; default 7. The rendered position is clamped
+    // so the scaled eye fits on the face.
+    "glowing_eyes": {
+      "scale_x": 1.0,
+      "scale_y": 1.0,
+      "left_x": 3,
+      "left_y": 7,
+      "right_x": 11,
+      "right_y": 7
+    }
+  },
+  // Per-template spawn saved by /boss setspawn <template>. X/Z bounded to +/-30,000,000; Y to build
+  // height with room for the scaled underground holding position.
+  // set: true uses saved position/dimension; false uses the command source.
+  // x: Block X coordinate.
+  // y: Block Y coordinate.
+  // z: Block Z coordinate.
+  // dimension: Dimension ID, e.g. minecraft:overworld.
+  "spawn": {
+    "set": false,
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "dimension": "minecraft:overworld"
+  },
+  // health: Marked boss maximum health, 1-1,000,000 points (2 points = 1 heart). Native health, damage,
+  // healing, save and sync stay in use. Health modifiers retain native math; the final maximum is
+  // bounded to this range. Ordinary entities keep their vanilla limits. Reload preserves the current
+  // health fraction; loading a saved boss preserves its saved health.
+  // movement_speed: Base movement attribute, 0-1; phases can override.
+  // knockback_resistance: 0 = none, 1 = full resistance; phases can override.
+  // follow_range: 0 = automatic arena range (default): boss-centered radius or full box diagonal, capped
+  // at 256 blocks. No arena uses 24 blocks. Positive 1-256 sets an explicit detection/follow distance.
+  // Computed on phase assignment/reload, not each tick.
+  // scale: Size multiplier, 0.25-4; 1 = normal. Dormant depth grows with size.
+  "health": 2200.0,
+  "movement_speed": 0.15,
+  "knockback_resistance": 1.0,
+  "follow_range": 0.0,
+  "scale": 2.0,
+  // Emissive glow and transition effects; base skin colors stay unchanged.
+  // color: Glow tint as #RRGGBB; each phase can override.
+  "warden_effects": {
+    "color": "#55FFFF",
+    // One-time effects on a health-phase transition, including healing. Initial spawn/reload assignment is
+    // silent.
+    // flash: Enable the brief white glow flash (8 client ticks).
+    "phase_change": {
+      "flash": true,
+      // One burst of small dust particles in the entering phase color; client particle settings may reduce
+      // visibility.
+      // enabled: Enable the burst.
+      // count: Particle count, 1-128.
+      // spread: Spread in blocks, 0-4.
+      // speed: Initial speed, 0-2.
+      // size: Dust size, 0.1-4; smaller values make finer particles.
+      "particle_explosion": {
+        "enabled": true,
+        "count": 128,
+        "spread": 0.8,
+        "speed": 0.12,
+        "size": 0.65
+      }
+    }
+  },
+  // OGG Vorbis files in this template folder's sounds/ on the server; never shared with another
+  // template. Lowercase ASCII filenames only; no spaces, capitals or paths. Limit: 1 MiB minus 1 KiB and
+  // 30 seconds. MP3/WAV unsupported. Reload after file edits. Use mono for directional sound at the
+  // boss; stereo lacks normal 3D positioning. Long clips stay where they started. Bounded
+  // transfer/validation protects slow clients; first-use playback may be delayed.
+  // mob_volume: Native Warden sound multiplier: 0 = mute, 0.25 = quarter volume (default), 1 = vanilla
+  // volume. Includes ambient, hurt/death, steps, roar, heartbeat and Sonic Boom. Custom OGG events and
+  // voice lines keep their separate volume settings. /boss reload applies edits.
+  "sounds": {
+    // Plays once when the boss activates and begins emerging, not on /boss spawn.
+    // file: Exact OGG filename, e.g. boss_phase.ogg; "" disables.
+    // volume: Volume multiplier, 0-4; also follows the client Hostile slider.
+    // pitch: Pitch multiplier, 0.5-2.
+    // range: Audible distance in blocks, 1-128.
+    "spawn": {
+      "file": "",
+      "volume": 1.0,
+      "pitch": 1.0,
+      "range": 32.0
+    },
+    // Shared fallback for actual phase transitions; initial spawn/reload phase assignment plays no phase
+    // sound. Null/missing phase fields inherit; an explicit filename wins even if missing. An empty phase
+    // file disables that transition.
+    // file: Exact OGG filename, e.g. boss_phase.ogg; "" disables.
+    // volume: Volume multiplier, 0-4; also follows the client Hostile slider.
+    // pitch: Pitch multiplier, 0.5-2.
+    // range: Audible distance in blocks, 1-128.
+    "phase_change": {
+      "file": "",
+      "volume": 1.0,
+      "pitch": 1.0,
+      "range": 32.0
+    },
+    // Plays when the boss dies; /boss remove does not play it.
+    // file: Exact OGG filename, e.g. boss_phase.ogg; "" disables.
+    // volume: Volume multiplier, 0-4; also follows the client Hostile slider.
+    // pitch: Pitch multiplier, 0.5-2.
+    // range: Audible distance in blocks, 1-128.
+    "death": {
+      "file": "",
+      "volume": 1.0,
+      "pitch": 1.0,
+      "range": 32.0
+    },
+    "mob_volume": 0.25
+  },
+  // Encounter music starts on activation for players in the arena; entrants join and leavers fade out.
+  // One track plays per client, with the most recently entered ready encounter taking priority. Put its
+  // OGG Vorbis file in this template's sounds folder. Mono or stereo works; the selected native sound
+  // channel controls volume. No track is included by default.
+  // enabled: true enables configured music; false disables it. A blank filename also disables playback.
+  // file: One lowercase .ogg basename, such as boss_music.ogg; no spaces, capitals or paths. Maximum 8
+  // MiB minus 1 KiB, ten minutes. The server validates and sends the compressed track in bounded chunks;
+  // slow clients start when it arrives.
+  // volume: Volume 0-4, multiplied by the player's Music/master sliders; default 0.75. Zero disables
+  // playback.
+  // loop: true repeats until encounter end; false plays once per arena entry. Late entrants start the
+  // track from its beginning, not the boss's playback position.
+  // fade_out_seconds: Fade duration 0-10 seconds on death, removal, unload or leaving the arena; default
+  // 2. Zero stops immediately. Reload refreshes music. Disconnect stops immediately and frees cached
+  // audio.
+  // channel: Native sound channel: music (default), record (Jukebox/Note Blocks), master (Master only),
+  // or another Minecraft category. Master still affects every channel. GUI changes and /stopsound use
+  // this category.
+  "music": {
+    "enabled": true,
+    "file": "",
+    "volume": 0.75,
+    "loop": true,
+    "fade_out_seconds": 2.0,
+    "channel": "music"
+  },
+  // Random attack voices from this template folder's sounds/voice-lines/. Each template has its own
+  // clips. Successful melee/Sonic Boom hits roll once; one voice at a time per boss. Up to 64 direct
+  // lowercase .ogg files, using the sound size/duration rules. Add files then /boss reload. Use mono for
+  // directional sound; long clips stay where they started.
+  // enabled: Enable attack voice lines; an empty folder is silent.
+  // chance: Probability per eligible successful hit, 0-1; 0.25 = 25%. Busy voices skip the roll.
+  // volume: Volume multiplier, 0-4; follows the client Hostile slider.
+  // pitch: Pitch multiplier, 0.5-2; adjusts the non-overlap duration too.
+  // range: Audible distance in blocks, 1-128.
+  "voice_lines": {
+    "enabled": true,
+    "chance": 0.25,
+    "volume": 1.0,
+    "pitch": 1.0,
+    "range": 32.0
+  },
+  // Completed swings and fired beams count toward target rotation. Hold time and minimum attacks gate
+  // chance rolls; the maximum forces a different eligible opponent. Solo fights keep their target.
+  // Cancelled beams and disabled/cooldown-rejected swings do not count. No additional watcher.
+  // switch_chance: Probability 0-1 after minimum attacks/time: 0 switches only at the maximum; 1
+  // switches at the first eligible completion. Default 0.5. The maximum forces rotation regardless of
+  // chance when an alternative exists.
+  // mode: Choose nearest, random (default), or farthest alternative. Players must be inside the arena
+  // and natively eligible. Melee rotation uses follow range; ranged rotation uses the fired beam
+  // horizontal/vertical range. Unset arena uses that attack range.
+  // min_target_ticks: Minimum time on one valid target, 0-12000 ticks; default 60 = 3 seconds. Checked
+  // on assignments/completed attacks without a timer. Dead, disconnected, removed or ineligible targets
+  // can be replaced immediately. Time takes priority over maximum attacks.
+  // min_attacks: Completed attacks on the same target before chance rolls, whole number 1-1000; default
+  // 1. Counts melee swings (including blocked hits) and fired beams, not cancelled windups.
+  // max_attacks: Force rotation after this many completed attacks, whole number 1-1000; default 4. Must
+  // be at least min_attacks. Hold time or no alternative can exceed this count; switch at the next
+  // eligible completion. Counts reset on an actual target change, not each phase.
+  "targeting": {
+    "switch_chance": 0.5,
+    "mode": "random",
+    // Show the actual new target to that player and arena viewers. A personal warning can replace a recent
+    // audience warning about someone else. Personal warnings still share a recipient cooldown across
+    // bosses. Same-target assignments stay silent; skipped titles are not queued.
+    // enabled: Enable dramatic target titles. This never postpones attacks or adds recovery time.
+    // text: Literal text, at most 80 characters; <player> becomes the actual account name. Default: RUN,
+    // <player>!. No JSON formatting or commands.
+    // cooldown_ticks: Recipient cooldown, 20-1200 ticks; default 60. Also covers title display/fades. A
+    // new target bypasses an audience-only warning; recent personal warnings still throttle across bosses.
+    // display_ticks: Hold title 1-100 ticks (default 20), plus 2-tick fade in and 4-tick fade out.
+    "announcement": {
+      "enabled": true,
+      "text": "RUN, <player>!",
+      "cooldown_ticks": 60,
+      "display_ticks": 20
+    },
+    "min_target_ticks": 60,
+    "min_attacks": 1,
+    "max_attacks": 4
+  },
+  // Base attacks; per-phase values override them. Minecraft handles targeting and navigation.
+  "attacks": {
+    // Native melee uses this base policy unless overridden by the current phase. Each attempt applies the
+    // health-selected phase before reading native damage/knockback, permission and cooldown. The current
+    // phase delay is measured from the last successful hit; blocked hits do not reset it.
+    // enabled: Allow melee. false lets enabled Sonic Boom attack inside melee reach.
+    // cooldown_ticks: Minimum delay between successful hits, 1-1,000,000 ticks.
+    // damage: Damage in health points, 0-1,000,000.
+    // knockback: Horizontal knockback strength, 0-100.
+    // charge_time_ticks: Wind-up before the native hit, whole number 0-12000 ticks. 0 keeps immediate
+    // hits. Longer wind-ups stretch the built-in swing; target/phase/reload changes can cancel it.
+    // recovery_time_ticks: Built-in swing recovery after impact, whole number 0-12000 ticks; default 4.
+    // Recovery and the captured attack cooldown must finish before another melee swing.
+    "melee": {
+      "enabled": false,
+      "cooldown_ticks": 40,
+      "damage": 0.0,
+      "knockback": 0.0,
+      "charge_time_ticks": 0,
+      "recovery_time_ticks": 4
+    },
+    // New charges use the current phase. A started charge retains all its original settings through phase
+    // changes, healing and reload, even if the next phase disables Sonic Boom. A lost, switched, dead,
+    // removed, out-of-range or obstructed target cancels the charge; unload clears it.
+    // enabled: Allow Sonic Boom.
+    // cooldown_ticks: Delay between attacks, 1-1,000,000 ticks.
+    // damage: Damage in health points, 0-1,000,000.
+    // horizontal_range: Horizontal target range in blocks, 0-256.
+    // vertical_range: Vertical target range in blocks, 0-256.
+    // requires_line_of_sight: true prevents starting/hitting through solid obstructions.
+    // knockback_horizontal: Horizontal knockback strength, 0-100.
+    // knockback_vertical: Vertical knockback strength, 0-100.
+    // charge_time_ticks: Windup 0-1,000,000 ticks. Captured shot timing drives native windup keyframes:
+    // shorter is faster, longer is slower. Zero fires immediately. Normal-speed recoil is visual only;
+    // cooldown remains independent. Native charge sound keeps normal pitch/duration and can end before a
+    // long windup.
+    // recovery_time_ticks: Built-in Sonic Boom recovery after firing, whole number 0-12000 ticks; default
+    // 26. The next beam waits for both recovery and its captured cooldown.
+    "sonic_boom": {
+      "enabled": true,
+      "cooldown_ticks": 30,
+      "damage": 4.0,
+      "horizontal_range": 15.0,
+      "vertical_range": 20.0,
+      "requires_line_of_sight": true,
+      "knockback_horizontal": 0.4,
+      "knockback_vertical": 0.1,
+      "charge_time_ticks": 20,
+      "recovery_time_ticks": 26
+    },
+    // Default sound for roar interludes; this section alone does not trigger a roar. Minecraft owns the
+    // roar animation/activity (about 84 ticks), then the next subphase begins.
+    "roar": {
+      // Optional mono OGG in this template's sounds folder. Sent through the existing bounded media path and
+      // played at the boss. Blank file uses the vanilla roar.
+      // file: Lowercase OGG basename, no spaces or paths. Blank uses the native Warden roar; child/phase
+      // null inherits the parent sound.
+      // volume: Custom roar volume, 0-4; default 1.
+      // pitch: Custom roar pitch, 0.5-2; default 1.
+      // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+      "sound": {
+        "file": "",
+        "volume": 1.0,
+        "pitch": 1.0,
+        "range": 32.0
+      }
+    }
+  },
+  // Underground aura before activation: defaults give 1-2 seconds of Darkness every 10 seconds,
+  // depending on distance. Independent of active phases. Center is the hidden boss position; no aura
+  // during emergence. Missing/null fields inherit phase 1. Existing effects expire normally.
+  // enabled: false stops new applications/refreshes; existing Darkness expires normally. null/missing
+  // inherits phase 1.
+  // max_radius: Spherical radius in blocks including height, 0-256; 0 disables. null/missing inherits
+  // phase 1.
+  // edge_interval_ticks: Refresh eligibility at outer edge, 1-12000 ticks; 200 = 10 seconds. Shorter
+  // intervals allow more frequent refreshes.
+  // center_interval_ticks: Refresh eligibility at boss, 1-12000 ticks; 20 = 1 second. Existing effects
+  // refresh when half-duration remains.
+  // edge_duration_ticks: Effect length at edge, 1-12000 ticks; 20 = 1 second. Duration below interval
+  // creates gaps.
+  // center_duration_ticks: Effect length at boss, 1-12000 ticks; 40 = 2 seconds. For continuity use at
+  // least twice interval plus scan margin.
+  // edge_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+  // visual darkness or set priority against Night Vision. Edge effect priority, 0-4; 0 = level I. Higher
+  // does not make the screen darker. null/missing inherits phase 1.
+  // center_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+  // visual darkness or set priority against Night Vision. Center effect priority, 0-4; blended toward
+  // edge with distance. 0 = normal. null/missing inherits phase 1.
+  "dormant_darkness": {
+    "enabled": true,
+    "max_radius": 80.0,
+    "edge_interval_ticks": 200,
+    "center_interval_ticks": 200,
+    "edge_duration_ticks": 20,
+    "center_duration_ticks": 40,
+    "edge_amplifier": 0,
+    "center_amplifier": 0
+  },
+  // 1-16 stages in file order (first to last). Each non-final stage leaves at its minimum_health_percent
+  // cutoff; the final stage covers remaining health. Cutoffs descend from 100 toward 0. The editor can
+  // add, remove or reorder stages. Defaults remain ANNOYED >75%, AGITATED >50%-75%, ENRAGED >25%-50%,
+  // FURY <=25%. 20 ticks = 1 second.
+  "phases": {
+    // Initial active phase; cyan glow by default. Underground Darkness is configured separately in
+    // dormant_darkness.
+    // minimum_health_percent: Leave this stage at or below this health percentage: 0-100, descending in
+    // fight order. The final stage does not use a cutoff.
+    // movement_speed: Phase movement attribute, 0-1; null/missing inherits base.
+    // knockback_resistance: Phase resistance, 0-1; null/missing inherits base.
+    // follow_range: null/missing inherits base. 0 uses automatic arena range; positive 1-256 overrides
+    // detection/follow distance. Automatic box coverage assumes the boss stays inside the arena.
+    // scale: Phase size, 0.25-4; null/missing inherits base.
+    // subphase_order: sequential: visit subphases in file order and cycle the roar list independently.
+    // random: run each subphase once in shuffled order, then reshuffle; pick a random roar at each
+    // transition. No immediate subphase repeats when there are at least two.
+    // roar_between_subphases: When true and the roar list is nonempty, pause attacks and play one native
+    // roar after each subphase, including the loop boundary. False or an empty roar list skips interludes.
+    "annoyed": {
+      "minimum_health_percent": 75.0,
+      "movement_speed": 0.15,
+      "knockback_resistance": 1.0,
+      "follow_range": null,
+      "scale": null,
+      // Sound overrides for entering this phase.
+      "sounds": {
+        // Null/missing fields inherit sounds.phase_change individually; blank file disables this transition.
+        // file: Entering-phase OGG filename, e.g. phase2.ogg; match exact case/spelling. null inherits; ""
+        // disables.
+        // volume: Volume multiplier, 0-4; null inherits.
+        // pitch: Pitch multiplier, 0.5-2; null inherits.
+        // range: Audible distance in blocks, 1-128; null inherits.
+        "phase_change": {
+          "file": null,
+          "volume": null,
+          "pitch": null,
+          "range": null
+        }
+      },
+      // Overrides attacks.melee; null/missing fields inherit. New melee attempts use this phase permission,
+      // cooldown and native attributes together.
+      // enabled: Allow melee. false lets enabled Sonic Boom attack inside melee reach.
+      // cooldown_ticks: Minimum delay between successful hits, 1-1,000,000 ticks.
+      // damage: Damage in health points, 0-1,000,000.
+      // knockback: Horizontal knockback strength, 0-100.
+      // charge_time_ticks: Wind-up before the native hit, whole number 0-12000 ticks. 0 keeps immediate
+      // hits. Longer wind-ups stretch the built-in swing; target/phase/reload changes can cancel it.
+      // Null/missing inherits base.
+      // recovery_time_ticks: Built-in swing recovery after impact, whole number 0-12000 ticks; default 4.
+      // Recovery and the captured attack cooldown must finish before another melee swing. Null/missing
+      // inherits base.
+      "melee": {
+        "enabled": false,
+        "cooldown_ticks": 40,
+        "damage": 0.0,
+        "knockback": 0.0,
+        "charge_time_ticks": null,
+        "recovery_time_ticks": null
+      },
+      // Overrides attacks.sonic_boom; null/missing fields inherit. Changes apply to the next charge; an
+      // in-progress charge keeps its start-time settings.
+      // enabled: Allow Sonic Boom.
+      // cooldown_ticks: Delay between attacks, 1-1,000,000 ticks.
+      // damage: Damage in health points, 0-1,000,000.
+      // horizontal_range: Horizontal target range in blocks, 0-256.
+      // vertical_range: Vertical target range in blocks, 0-256.
+      // requires_line_of_sight: true prevents starting/hitting through solid obstructions.
+      // knockback_horizontal: Horizontal knockback strength, 0-100.
+      // knockback_vertical: Vertical knockback strength, 0-100.
+      // charge_time_ticks: Captured windup in ticks, 0-1,000,000; null inherits base. Native windup
+      // animation follows this shot duration. No mandatory recovery or cooldown extension; native charge
+      // audio is not stretched.
+      // recovery_time_ticks: Built-in Sonic Boom recovery after firing, whole number 0-12000 ticks; default
+      // 26. The next beam waits for both recovery and its captured cooldown. Null/missing inherits base.
+      "sonic_boom": {
+        "enabled": true,
+        "cooldown_ticks": 30,
+        "damage": 4.0,
+        "horizontal_range": 15.0,
+        "vertical_range": 20.0,
+        "requires_line_of_sight": true,
+        "knockback_horizontal": 0.6,
+        "knockback_vertical": 0.15,
+        "charge_time_ticks": 20,
+        "recovery_time_ticks": null
+      },
+      // Phase glow; missing color/transition settings inherit base.
+      // color: Glow tint as #RRGGBB.
+      "warden_effects": {
+        "color": "#55FFFF"
+      },
+      // Active phase aura after emergence. Defaults increase coverage from 1-2 seconds every 10 seconds in
+      // phase 1 to continuous coverage in Fury. Timing and duration blend with distance; stronger existing
+      // Darkness is respected.
+      // enabled: false stops new applications/refreshes; existing Darkness expires normally. null/missing
+      // inherits the legacy base or safe default.
+      // max_radius: Spherical radius in blocks including height, 0-256; 0 disables. null/missing inherits
+      // the legacy base or safe default.
+      // edge_interval_ticks: Refresh eligibility at outer edge, 1-12000 ticks; 200 = 10 seconds. Shorter
+      // intervals allow more frequent refreshes.
+      // center_interval_ticks: Refresh eligibility at boss, 1-12000 ticks; 20 = 1 second. Existing effects
+      // refresh when half-duration remains.
+      // edge_duration_ticks: Effect length at edge, 1-12000 ticks; 20 = 1 second. Duration below interval
+      // creates gaps.
+      // center_duration_ticks: Effect length at boss, 1-12000 ticks; 40 = 2 seconds. For continuity use at
+      // least twice interval plus scan margin.
+      // edge_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+      // visual darkness or set priority against Night Vision. Edge effect priority, 0-4; 0 = level I. Higher
+      // does not make the screen darker. null/missing inherits the legacy base or safe default.
+      // center_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+      // visual darkness or set priority against Night Vision. Center effect priority, 0-4; blended toward
+      // edge with distance. 0 = normal. null/missing inherits the legacy base or safe default.
+      "darkness": {
+        "enabled": true,
+        "max_radius": 80.0,
+        "edge_interval_ticks": 200,
+        "center_interval_ticks": 200,
+        "edge_duration_ticks": 20,
+        "center_duration_ticks": 40,
+        "edge_amplifier": 0,
+        "center_amplifier": 0
+      },
+      // Per-phase target controls; null fields inherit base settings.
+      // switch_chance: Probability 0-1 after minimum attacks/time: 0 switches only at the maximum; 1
+      // switches at the first eligible completion. Default 0.5. The maximum forces rotation regardless of
+      // chance when an alternative exists. null/missing inherits base.
+      // mode: Choose nearest, random (default), or farthest alternative. Players must be inside the arena
+      // and natively eligible. Melee rotation uses follow range; ranged rotation uses the fired beam
+      // horizontal/vertical range. Unset arena uses that attack range. null/missing inherits base.
+      // min_target_ticks: Minimum time on one valid target, 0-12000 ticks; default 60 = 3 seconds. Checked
+      // on assignments/completed attacks without a timer. Dead, disconnected, removed or ineligible targets
+      // can be replaced immediately. Time takes priority over maximum attacks. null/missing inherits base.
+      // min_attacks: Completed attacks on the same target before chance rolls, whole number 1-1000; default
+      // 1. Counts melee swings (including blocked hits) and fired beams, not cancelled windups. null/missing
+      // inherits base.
+      // max_attacks: Force rotation after this many completed attacks, whole number 1-1000; default 4. Must
+      // be at least min_attacks. Hold time or no alternative can exceed this count; switch at the next
+      // eligible completion. Counts reset on an actual target change, not each phase. null/missing inherits
+      // base.
+      "targeting": {
+        "switch_chance": null,
+        "mode": null,
+        // Show the actual new target to that player and arena viewers. A personal warning can replace a recent
+        // audience warning about someone else. Personal warnings still share a recipient cooldown across
+        // bosses. Same-target assignments stay silent; skipped titles are not queued. null/missing inherits
+        // base.
+        // enabled: Enable dramatic target titles. This never postpones attacks or adds recovery time.
+        // null/missing inherits base.
+        // text: Literal text, at most 80 characters; <player> becomes the actual account name. Default: RUN,
+        // <player>!. No JSON formatting or commands. null/missing inherits base.
+        // cooldown_ticks: Recipient cooldown, 20-1200 ticks; default 60. Also covers title display/fades. A
+        // new target bypasses an audience-only warning; recent personal warnings still throttle across bosses.
+        // null/missing inherits base.
+        // display_ticks: Hold title 1-100 ticks (default 20), plus 2-tick fade in and 4-tick fade out.
+        // null/missing inherits base.
+        "announcement": {
+          "enabled": null,
+          "text": null,
+          "cooldown_ticks": null,
+          "display_ticks": null
+        },
+        "min_target_ticks": null,
+        "min_attacks": null,
+        "max_attacks": null
+      },
+      // Sound defaults inherited by this phase's roar list; does not trigger a main-phase roar.
+      "roar": {
+        // Optional mono OGG in this template's sounds folder. Sent through the existing bounded media path and
+        // played at the boss. Blank file uses the vanilla roar.
+        // file: Lowercase OGG basename, no spaces or paths. Blank uses the native Warden roar; child/phase
+        // null inherits the parent sound.
+        // volume: Custom roar volume, 0-4; default 1.
+        // pitch: Custom roar pitch, 0.5-2; default 1.
+        // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+        "sound": {
+          "file": null,
+          "volume": null,
+          "pitch": null,
+          "range": null
+        }
+      },
+      // Optional 0-16 attack or recovery entries inside this health phase. Empty disables the sequence.
+      // Sequential follows file order; random shuffles every entry once per round. Recovery pauses attacks
+      // and movement. Main-phase entry/reload resets it; no nested children or health cutoffs.
+      "subphases": {
+      },
+      "subphase_order": "sequential",
+      "roar_between_subphases": true,
+      // Optional 0-16 roar sounds between subphases. Sequential cycles this list independently: one repeats,
+      // two alternate, four pair with four subphases. Random picks one per transition; roars may repeat. No
+      // missing-slot inheritance rule is needed.
+      "roars": {
+      }
+    },
+    // Second phase; yellow glow by default.
+    // minimum_health_percent: Leave this stage at or below this health percentage: 0-100, descending in
+    // fight order. The final stage does not use a cutoff.
+    // movement_speed: Phase movement attribute, 0-1; null/missing inherits base.
+    // knockback_resistance: Phase resistance, 0-1; null/missing inherits base.
+    // follow_range: null/missing inherits base. 0 uses automatic arena range; positive 1-256 overrides
+    // detection/follow distance. Automatic box coverage assumes the boss stays inside the arena.
+    // scale: Phase size, 0.25-4; null/missing inherits base.
+    // subphase_order: sequential: visit subphases in file order and cycle the roar list independently.
+    // random: run each subphase once in shuffled order, then reshuffle; pick a random roar at each
+    // transition. No immediate subphase repeats when there are at least two.
+    // roar_between_subphases: When true and the roar list is nonempty, pause attacks and play one native
+    // roar after each subphase, including the loop boundary. False or an empty roar list skips interludes.
+    "agitated": {
+      "minimum_health_percent": 50.0,
+      "movement_speed": 0.22,
+      "knockback_resistance": 1.0,
+      "follow_range": null,
+      "scale": null,
+      // Sound overrides for entering this phase.
+      "sounds": {
+        // Null/missing fields inherit sounds.phase_change individually; blank file disables this transition.
+        // file: Entering-phase OGG filename, e.g. phase2.ogg; match exact case/spelling. null inherits; ""
+        // disables.
+        // volume: Volume multiplier, 0-4; null inherits.
+        // pitch: Pitch multiplier, 0.5-2; null inherits.
+        // range: Audible distance in blocks, 1-128; null inherits.
+        "phase_change": {
+          "file": null,
+          "volume": null,
+          "pitch": null,
+          "range": null
+        }
+      },
+      // Overrides attacks.melee; null/missing fields inherit. New melee attempts use this phase permission,
+      // cooldown and native attributes together.
+      // enabled: Allow melee. false lets enabled Sonic Boom attack inside melee reach.
+      // cooldown_ticks: Minimum delay between successful hits, 1-1,000,000 ticks.
+      // damage: Damage in health points, 0-1,000,000.
+      // knockback: Horizontal knockback strength, 0-100.
+      // charge_time_ticks: Wind-up before the native hit, whole number 0-12000 ticks. 0 keeps immediate
+      // hits. Longer wind-ups stretch the built-in swing; target/phase/reload changes can cancel it.
+      // Null/missing inherits base.
+      // recovery_time_ticks: Built-in swing recovery after impact, whole number 0-12000 ticks; default 4.
+      // Recovery and the captured attack cooldown must finish before another melee swing. Null/missing
+      // inherits base.
+      "melee": {
+        "enabled": true,
+        "cooldown_ticks": 40,
+        "damage": 10.0,
+        "knockback": 1.0,
+        "charge_time_ticks": null,
+        "recovery_time_ticks": null
+      },
+      // Overrides attacks.sonic_boom; null/missing fields inherit. Changes apply to the next charge; an
+      // in-progress charge keeps its start-time settings.
+      // enabled: Allow Sonic Boom.
+      // cooldown_ticks: Delay between attacks, 1-1,000,000 ticks.
+      // damage: Damage in health points, 0-1,000,000.
+      // horizontal_range: Horizontal target range in blocks, 0-256.
+      // vertical_range: Vertical target range in blocks, 0-256.
+      // requires_line_of_sight: true prevents starting/hitting through solid obstructions.
+      // knockback_horizontal: Horizontal knockback strength, 0-100.
+      // knockback_vertical: Vertical knockback strength, 0-100.
+      // charge_time_ticks: Captured windup in ticks, 0-1,000,000; null inherits base. Native windup
+      // animation follows this shot duration. No mandatory recovery or cooldown extension; native charge
+      // audio is not stretched.
+      // recovery_time_ticks: Built-in Sonic Boom recovery after firing, whole number 0-12000 ticks; default
+      // 26. The next beam waits for both recovery and its captured cooldown. Null/missing inherits base.
+      "sonic_boom": {
+        "enabled": true,
+        "cooldown_ticks": 30,
+        "damage": 6.0,
+        "horizontal_range": 15.0,
+        "vertical_range": 20.0,
+        "requires_line_of_sight": true,
+        "knockback_horizontal": 0.9,
+        "knockback_vertical": 0.2,
+        "charge_time_ticks": 20,
+        "recovery_time_ticks": null
+      },
+      // Phase glow; missing color/transition settings inherit base.
+      // color: Glow tint as #RRGGBB.
+      "warden_effects": {
+        "color": "#FFFF55"
+      },
+      // Active phase aura after emergence. Defaults increase coverage from 1-2 seconds every 10 seconds in
+      // phase 1 to continuous coverage in Fury. Timing and duration blend with distance; stronger existing
+      // Darkness is respected.
+      // enabled: false stops new applications/refreshes; existing Darkness expires normally. null/missing
+      // inherits the legacy base or safe default.
+      // max_radius: Spherical radius in blocks including height, 0-256; 0 disables. null/missing inherits
+      // the legacy base or safe default.
+      // edge_interval_ticks: Refresh eligibility at outer edge, 1-12000 ticks; 200 = 10 seconds. Shorter
+      // intervals allow more frequent refreshes.
+      // center_interval_ticks: Refresh eligibility at boss, 1-12000 ticks; 20 = 1 second. Existing effects
+      // refresh when half-duration remains.
+      // edge_duration_ticks: Effect length at edge, 1-12000 ticks; 20 = 1 second. Duration below interval
+      // creates gaps.
+      // center_duration_ticks: Effect length at boss, 1-12000 ticks; 40 = 2 seconds. For continuity use at
+      // least twice interval plus scan margin.
+      // edge_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+      // visual darkness or set priority against Night Vision. Edge effect priority, 0-4; 0 = level I. Higher
+      // does not make the screen darker. null/missing inherits the legacy base or safe default.
+      // center_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+      // visual darkness or set priority against Night Vision. Center effect priority, 0-4; blended toward
+      // edge with distance. 0 = normal. null/missing inherits the legacy base or safe default.
+      "darkness": {
+        "enabled": true,
+        "max_radius": 16.0,
+        "edge_interval_ticks": 160,
+        "center_interval_ticks": 160,
+        "edge_duration_ticks": 40,
+        "center_duration_ticks": 60,
+        "edge_amplifier": 0,
+        "center_amplifier": 0
+      },
+      // Per-phase target controls; null fields inherit base settings.
+      // switch_chance: Probability 0-1 after minimum attacks/time: 0 switches only at the maximum; 1
+      // switches at the first eligible completion. Default 0.5. The maximum forces rotation regardless of
+      // chance when an alternative exists. null/missing inherits base.
+      // mode: Choose nearest, random (default), or farthest alternative. Players must be inside the arena
+      // and natively eligible. Melee rotation uses follow range; ranged rotation uses the fired beam
+      // horizontal/vertical range. Unset arena uses that attack range. null/missing inherits base.
+      // min_target_ticks: Minimum time on one valid target, 0-12000 ticks; default 60 = 3 seconds. Checked
+      // on assignments/completed attacks without a timer. Dead, disconnected, removed or ineligible targets
+      // can be replaced immediately. Time takes priority over maximum attacks. null/missing inherits base.
+      // min_attacks: Completed attacks on the same target before chance rolls, whole number 1-1000; default
+      // 1. Counts melee swings (including blocked hits) and fired beams, not cancelled windups. null/missing
+      // inherits base.
+      // max_attacks: Force rotation after this many completed attacks, whole number 1-1000; default 4. Must
+      // be at least min_attacks. Hold time or no alternative can exceed this count; switch at the next
+      // eligible completion. Counts reset on an actual target change, not each phase. null/missing inherits
+      // base.
+      "targeting": {
+        "switch_chance": null,
+        "mode": null,
+        // Show the actual new target to that player and arena viewers. A personal warning can replace a recent
+        // audience warning about someone else. Personal warnings still share a recipient cooldown across
+        // bosses. Same-target assignments stay silent; skipped titles are not queued. null/missing inherits
+        // base.
+        // enabled: Enable dramatic target titles. This never postpones attacks or adds recovery time.
+        // null/missing inherits base.
+        // text: Literal text, at most 80 characters; <player> becomes the actual account name. Default: RUN,
+        // <player>!. No JSON formatting or commands. null/missing inherits base.
+        // cooldown_ticks: Recipient cooldown, 20-1200 ticks; default 60. Also covers title display/fades. A
+        // new target bypasses an audience-only warning; recent personal warnings still throttle across bosses.
+        // null/missing inherits base.
+        // display_ticks: Hold title 1-100 ticks (default 20), plus 2-tick fade in and 4-tick fade out.
+        // null/missing inherits base.
+        "announcement": {
+          "enabled": null,
+          "text": null,
+          "cooldown_ticks": null,
+          "display_ticks": null
+        },
+        "min_target_ticks": null,
+        "min_attacks": null,
+        "max_attacks": null
+      },
+      // Sound defaults inherited by this phase's roar list; does not trigger a main-phase roar.
+      "roar": {
+        // Optional mono OGG in this template's sounds folder. Sent through the existing bounded media path and
+        // played at the boss. Blank file uses the vanilla roar.
+        // file: Lowercase OGG basename, no spaces or paths. Blank uses the native Warden roar; child/phase
+        // null inherits the parent sound.
+        // volume: Custom roar volume, 0-4; default 1.
+        // pitch: Custom roar pitch, 0.5-2; default 1.
+        // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+        "sound": {
+          "file": null,
+          "volume": null,
+          "pitch": null,
+          "range": null
+        }
+      },
+      // Optional 0-16 attack or recovery entries inside this health phase. Empty disables the sequence.
+      // Sequential follows file order; random shuffles every entry once per round. Recovery pauses attacks
+      // and movement. Main-phase entry/reload resets it; no nested children or health cutoffs.
+      "subphases": {
+      },
+      "subphase_order": "sequential",
+      "roar_between_subphases": true,
+      // Optional 0-16 roar sounds between subphases. Sequential cycles this list independently: one repeats,
+      // two alternate, four pair with four subphases. Random picks one per transition; roars may repeat. No
+      // missing-slot inheritance rule is needed.
+      "roars": {
+      }
+    },
+    // Third phase; orange glow by default.
+    // minimum_health_percent: Leave this stage at or below this health percentage: 0-100, descending in
+    // fight order. The final stage does not use a cutoff.
+    // movement_speed: Phase movement attribute, 0-1; null/missing inherits base.
+    // knockback_resistance: Phase resistance, 0-1; null/missing inherits base.
+    // follow_range: null/missing inherits base. 0 uses automatic arena range; positive 1-256 overrides
+    // detection/follow distance. Automatic box coverage assumes the boss stays inside the arena.
+    // scale: Phase size, 0.25-4; null/missing inherits base.
+    // subphase_order: sequential: visit subphases in file order and cycle the roar list independently.
+    // random: run each subphase once in shuffled order, then reshuffle; pick a random roar at each
+    // transition. No immediate subphase repeats when there are at least two.
+    // roar_between_subphases: When true and the roar list is nonempty, pause attacks and play one native
+    // roar after each subphase, including the loop boundary. False or an empty roar list skips interludes.
+    "enraged": {
+      "minimum_health_percent": 25.0,
+      "movement_speed": 0.3,
+      "knockback_resistance": 1.0,
+      "follow_range": null,
+      "scale": null,
+      // Sound overrides for entering this phase.
+      "sounds": {
+        // Null/missing fields inherit sounds.phase_change individually; blank file disables this transition.
+        // file: Entering-phase OGG filename, e.g. phase2.ogg; match exact case/spelling. null inherits; ""
+        // disables.
+        // volume: Volume multiplier, 0-4; null inherits.
+        // pitch: Pitch multiplier, 0.5-2; null inherits.
+        // range: Audible distance in blocks, 1-128; null inherits.
+        "phase_change": {
+          "file": null,
+          "volume": null,
+          "pitch": null,
+          "range": null
+        }
+      },
+      // Overrides attacks.melee; null/missing fields inherit. New melee attempts use this phase permission,
+      // cooldown and native attributes together.
+      // enabled: Allow melee. false lets enabled Sonic Boom attack inside melee reach.
+      // cooldown_ticks: Minimum delay between successful hits, 1-1,000,000 ticks.
+      // damage: Damage in health points, 0-1,000,000.
+      // knockback: Horizontal knockback strength, 0-100.
+      // charge_time_ticks: Wind-up before the native hit, whole number 0-12000 ticks. 0 keeps immediate
+      // hits. Longer wind-ups stretch the built-in swing; target/phase/reload changes can cancel it.
+      // Null/missing inherits base.
+      // recovery_time_ticks: Built-in swing recovery after impact, whole number 0-12000 ticks; default 4.
+      // Recovery and the captured attack cooldown must finish before another melee swing. Null/missing
+      // inherits base.
+      "melee": {
+        "enabled": true,
+        "cooldown_ticks": 30,
+        "damage": 15.0,
+        "knockback": 1.2,
+        "charge_time_ticks": null,
+        "recovery_time_ticks": null
+      },
+      // Overrides attacks.sonic_boom; null/missing fields inherit. Changes apply to the next charge; an
+      // in-progress charge keeps its start-time settings.
+      // enabled: Allow Sonic Boom.
+      // cooldown_ticks: Delay between attacks, 1-1,000,000 ticks.
+      // damage: Damage in health points, 0-1,000,000.
+      // horizontal_range: Horizontal target range in blocks, 0-256.
+      // vertical_range: Vertical target range in blocks, 0-256.
+      // requires_line_of_sight: true prevents starting/hitting through solid obstructions.
+      // knockback_horizontal: Horizontal knockback strength, 0-100.
+      // knockback_vertical: Vertical knockback strength, 0-100.
+      // charge_time_ticks: Captured windup in ticks, 0-1,000,000; null inherits base. Native windup
+      // animation follows this shot duration. No mandatory recovery or cooldown extension; native charge
+      // audio is not stretched.
+      // recovery_time_ticks: Built-in Sonic Boom recovery after firing, whole number 0-12000 ticks; default
+      // 26. The next beam waits for both recovery and its captured cooldown. Null/missing inherits base.
+      "sonic_boom": {
+        "enabled": true,
+        "cooldown_ticks": 40,
+        "damage": 8.0,
+        "horizontal_range": 15.0,
+        "vertical_range": 20.0,
+        "requires_line_of_sight": true,
+        "knockback_horizontal": 1.0,
+        "knockback_vertical": 0.2,
+        "charge_time_ticks": 40,
+        "recovery_time_ticks": null
+      },
+      // Phase glow; missing color/transition settings inherit base.
+      // color: Glow tint as #RRGGBB.
+      "warden_effects": {
+        "color": "#FFAA33"
+      },
+      // Active phase aura after emergence. Defaults increase coverage from 1-2 seconds every 10 seconds in
+      // phase 1 to continuous coverage in Fury. Timing and duration blend with distance; stronger existing
+      // Darkness is respected.
+      // enabled: false stops new applications/refreshes; existing Darkness expires normally. null/missing
+      // inherits the legacy base or safe default.
+      // max_radius: Spherical radius in blocks including height, 0-256; 0 disables. null/missing inherits
+      // the legacy base or safe default.
+      // edge_interval_ticks: Refresh eligibility at outer edge, 1-12000 ticks; 200 = 10 seconds. Shorter
+      // intervals allow more frequent refreshes.
+      // center_interval_ticks: Refresh eligibility at boss, 1-12000 ticks; 20 = 1 second. Existing effects
+      // refresh when half-duration remains.
+      // edge_duration_ticks: Effect length at edge, 1-12000 ticks; 20 = 1 second. Duration below interval
+      // creates gaps.
+      // center_duration_ticks: Effect length at boss, 1-12000 ticks; 40 = 2 seconds. For continuity use at
+      // least twice interval plus scan margin.
+      // edge_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+      // visual darkness or set priority against Night Vision. Edge effect priority, 0-4; 0 = level I. Higher
+      // does not make the screen darker. null/missing inherits the legacy base or safe default.
+      // center_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+      // visual darkness or set priority against Night Vision. Center effect priority, 0-4; blended toward
+      // edge with distance. 0 = normal. null/missing inherits the legacy base or safe default.
+      "darkness": {
+        "enabled": true,
+        "max_radius": 20.0,
+        "edge_interval_ticks": 100,
+        "center_interval_ticks": 100,
+        "edge_duration_ticks": 80,
+        "center_duration_ticks": 120,
+        "edge_amplifier": 0,
+        "center_amplifier": 0
+      },
+      // Per-phase target controls; null fields inherit base settings.
+      // switch_chance: Probability 0-1 after minimum attacks/time: 0 switches only at the maximum; 1
+      // switches at the first eligible completion. Default 0.5. The maximum forces rotation regardless of
+      // chance when an alternative exists. null/missing inherits base.
+      // mode: Choose nearest, random (default), or farthest alternative. Players must be inside the arena
+      // and natively eligible. Melee rotation uses follow range; ranged rotation uses the fired beam
+      // horizontal/vertical range. Unset arena uses that attack range. null/missing inherits base.
+      // min_target_ticks: Minimum time on one valid target, 0-12000 ticks; default 60 = 3 seconds. Checked
+      // on assignments/completed attacks without a timer. Dead, disconnected, removed or ineligible targets
+      // can be replaced immediately. Time takes priority over maximum attacks. null/missing inherits base.
+      // min_attacks: Completed attacks on the same target before chance rolls, whole number 1-1000; default
+      // 1. Counts melee swings (including blocked hits) and fired beams, not cancelled windups. null/missing
+      // inherits base.
+      // max_attacks: Force rotation after this many completed attacks, whole number 1-1000; default 4. Must
+      // be at least min_attacks. Hold time or no alternative can exceed this count; switch at the next
+      // eligible completion. Counts reset on an actual target change, not each phase. null/missing inherits
+      // base.
+      "targeting": {
+        "switch_chance": null,
+        "mode": null,
+        // Show the actual new target to that player and arena viewers. A personal warning can replace a recent
+        // audience warning about someone else. Personal warnings still share a recipient cooldown across
+        // bosses. Same-target assignments stay silent; skipped titles are not queued. null/missing inherits
+        // base.
+        // enabled: Enable dramatic target titles. This never postpones attacks or adds recovery time.
+        // null/missing inherits base.
+        // text: Literal text, at most 80 characters; <player> becomes the actual account name. Default: RUN,
+        // <player>!. No JSON formatting or commands. null/missing inherits base.
+        // cooldown_ticks: Recipient cooldown, 20-1200 ticks; default 60. Also covers title display/fades. A
+        // new target bypasses an audience-only warning; recent personal warnings still throttle across bosses.
+        // null/missing inherits base.
+        // display_ticks: Hold title 1-100 ticks (default 20), plus 2-tick fade in and 4-tick fade out.
+        // null/missing inherits base.
+        "announcement": {
+          "enabled": null,
+          "text": null,
+          "cooldown_ticks": null,
+          "display_ticks": null
+        },
+        "min_target_ticks": null,
+        "min_attacks": null,
+        "max_attacks": null
+      },
+      // Sound defaults inherited by this phase's roar list; does not trigger a main-phase roar.
+      "roar": {
+        // Optional mono OGG in this template's sounds folder. Sent through the existing bounded media path and
+        // played at the boss. Blank file uses the vanilla roar.
+        // file: Lowercase OGG basename, no spaces or paths. Blank uses the native Warden roar; child/phase
+        // null inherits the parent sound.
+        // volume: Custom roar volume, 0-4; default 1.
+        // pitch: Custom roar pitch, 0.5-2; default 1.
+        // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+        "sound": {
+          "file": null,
+          "volume": null,
+          "pitch": null,
+          "range": null
+        }
+      },
+      // Optional 0-16 attack or recovery entries inside this health phase. Empty disables the sequence.
+      // Sequential follows file order; random shuffles every entry once per round. Recovery pauses attacks
+      // and movement. Main-phase entry/reload resets it; no nested children or health cutoffs.
+      "subphases": {
+      },
+      "subphase_order": "sequential",
+      "roar_between_subphases": true,
+      // Optional 0-16 roar sounds between subphases. Sequential cycles this list independently: one repeats,
+      // two alternate, four pair with four subphases. Random picks one per transition; roars may repeat. No
+      // missing-slot inheritance rule is needed.
+      "roars": {
+      }
+    },
+    // Final phase; red glow by default. No separate terminal cutoff.
+    // movement_speed: Phase movement attribute, 0-1; null/missing inherits base.
+    // knockback_resistance: Phase resistance, 0-1; null/missing inherits base.
+    // follow_range: null/missing inherits base. 0 uses automatic arena range; positive 1-256 overrides
+    // detection/follow distance. Automatic box coverage assumes the boss stays inside the arena.
+    // scale: Phase size, 0.25-4; null/missing inherits base.
+    // subphase_order: sequential: visit subphases in file order and cycle the roar list independently.
+    // random: run each subphase once in shuffled order, then reshuffle; pick a random roar at each
+    // transition. No immediate subphase repeats when there are at least two.
+    // roar_between_subphases: When true and the roar list is nonempty, pause attacks and play one native
+    // roar after each subphase, including the loop boundary. False or an empty roar list skips interludes.
+    "fury": {
+      "movement_speed": 0.36,
+      "knockback_resistance": 1.0,
+      "follow_range": null,
+      "scale": null,
+      // Sound overrides for entering this phase.
+      "sounds": {
+        // Null/missing fields inherit sounds.phase_change individually; blank file disables this transition.
+        // file: Entering-phase OGG filename, e.g. phase2.ogg; match exact case/spelling. null inherits; ""
+        // disables.
+        // volume: Volume multiplier, 0-4; null inherits.
+        // pitch: Pitch multiplier, 0.5-2; null inherits.
+        // range: Audible distance in blocks, 1-128; null inherits.
+        "phase_change": {
+          "file": null,
+          "volume": null,
+          "pitch": null,
+          "range": null
+        }
+      },
+      // Overrides attacks.melee; null/missing fields inherit. New melee attempts use this phase permission,
+      // cooldown and native attributes together.
+      // enabled: Allow melee. false lets enabled Sonic Boom attack inside melee reach.
+      // cooldown_ticks: Minimum delay between successful hits, 1-1,000,000 ticks.
+      // damage: Damage in health points, 0-1,000,000.
+      // knockback: Horizontal knockback strength, 0-100.
+      // charge_time_ticks: Wind-up before the native hit, whole number 0-12000 ticks. 0 keeps immediate
+      // hits. Longer wind-ups stretch the built-in swing; target/phase/reload changes can cancel it.
+      // Null/missing inherits base.
+      // recovery_time_ticks: Built-in swing recovery after impact, whole number 0-12000 ticks; default 4.
+      // Recovery and the captured attack cooldown must finish before another melee swing. Null/missing
+      // inherits base.
+      "melee": {
+        "enabled": true,
+        "cooldown_ticks": 24,
+        "damage": 20.0,
+        "knockback": 1.5,
+        "charge_time_ticks": null,
+        "recovery_time_ticks": null
+      },
+      // Overrides attacks.sonic_boom; null/missing fields inherit. Changes apply to the next charge; an
+      // in-progress charge keeps its start-time settings.
+      // enabled: Allow Sonic Boom.
+      // cooldown_ticks: Delay between attacks, 1-1,000,000 ticks.
+      // damage: Damage in health points, 0-1,000,000.
+      // horizontal_range: Horizontal target range in blocks, 0-256.
+      // vertical_range: Vertical target range in blocks, 0-256.
+      // requires_line_of_sight: true prevents starting/hitting through solid obstructions.
+      // knockback_horizontal: Horizontal knockback strength, 0-100.
+      // knockback_vertical: Vertical knockback strength, 0-100.
+      // charge_time_ticks: Captured windup in ticks, 0-1,000,000; null inherits base. Native windup
+      // animation follows this shot duration. No mandatory recovery or cooldown extension; native charge
+      // audio is not stretched.
+      // recovery_time_ticks: Built-in Sonic Boom recovery after firing, whole number 0-12000 ticks; default
+      // 26. The next beam waits for both recovery and its captured cooldown. Null/missing inherits base.
+      "sonic_boom": {
+        "enabled": true,
+        "cooldown_ticks": 30,
+        "damage": 10.0,
+        "horizontal_range": 15.0,
+        "vertical_range": 20.0,
+        "requires_line_of_sight": true,
+        "knockback_horizontal": 1.3,
+        "knockback_vertical": 0.25,
+        "charge_time_ticks": 24,
+        "recovery_time_ticks": null
+      },
+      // Phase glow; missing color/transition settings inherit base.
+      // color: Glow tint as #RRGGBB.
+      "warden_effects": {
+        "color": "#FF3344"
+      },
+      // Active phase aura after emergence. Defaults increase coverage from 1-2 seconds every 10 seconds in
+      // phase 1 to continuous coverage in Fury. Timing and duration blend with distance; stronger existing
+      // Darkness is respected.
+      // enabled: false stops new applications/refreshes; existing Darkness expires normally. null/missing
+      // inherits the legacy base or safe default.
+      // max_radius: Spherical radius in blocks including height, 0-256; 0 disables. null/missing inherits
+      // the legacy base or safe default.
+      // edge_interval_ticks: Refresh eligibility at outer edge, 1-12000 ticks; 200 = 10 seconds. Shorter
+      // intervals allow more frequent refreshes.
+      // center_interval_ticks: Refresh eligibility at boss, 1-12000 ticks; 20 = 1 second. Existing effects
+      // refresh when half-duration remains.
+      // edge_duration_ticks: Effect length at edge, 1-12000 ticks; 20 = 1 second. Duration below interval
+      // creates gaps.
+      // center_duration_ticks: Effect length at boss, 1-12000 ticks; 40 = 2 seconds. For continuity use at
+      // least twice interval plus scan margin.
+      // edge_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+      // visual darkness or set priority against Night Vision. Edge effect priority, 0-4; 0 = level I. Higher
+      // does not make the screen darker. null/missing inherits the legacy base or safe default.
+      // center_amplifier: Keep at 0. Priority between overlapping Darkness effects only; does not increase
+      // visual darkness or set priority against Night Vision. Center effect priority, 0-4; blended toward
+      // edge with distance. 0 = normal. null/missing inherits the legacy base or safe default.
+      "darkness": {
+        "enabled": true,
+        "max_radius": 24.0,
+        "edge_interval_ticks": 20,
+        "center_interval_ticks": 20,
+        "edge_duration_ticks": 120,
+        "center_duration_ticks": 120,
+        "edge_amplifier": 0,
+        "center_amplifier": 0
+      },
+      // Per-phase target controls; null fields inherit base settings.
+      // switch_chance: Probability 0-1 after minimum attacks/time: 0 switches only at the maximum; 1
+      // switches at the first eligible completion. Default 0.5. The maximum forces rotation regardless of
+      // chance when an alternative exists. null/missing inherits base.
+      // mode: Choose nearest, random (default), or farthest alternative. Players must be inside the arena
+      // and natively eligible. Melee rotation uses follow range; ranged rotation uses the fired beam
+      // horizontal/vertical range. Unset arena uses that attack range. null/missing inherits base.
+      // min_target_ticks: Minimum time on one valid target, 0-12000 ticks; default 60 = 3 seconds. Checked
+      // on assignments/completed attacks without a timer. Dead, disconnected, removed or ineligible targets
+      // can be replaced immediately. Time takes priority over maximum attacks. null/missing inherits base.
+      // min_attacks: Completed attacks on the same target before chance rolls, whole number 1-1000; default
+      // 1. Counts melee swings (including blocked hits) and fired beams, not cancelled windups. null/missing
+      // inherits base.
+      // max_attacks: Force rotation after this many completed attacks, whole number 1-1000; default 4. Must
+      // be at least min_attacks. Hold time or no alternative can exceed this count; switch at the next
+      // eligible completion. Counts reset on an actual target change, not each phase. null/missing inherits
+      // base.
+      "targeting": {
+        "switch_chance": null,
+        "mode": null,
+        // Show the actual new target to that player and arena viewers. A personal warning can replace a recent
+        // audience warning about someone else. Personal warnings still share a recipient cooldown across
+        // bosses. Same-target assignments stay silent; skipped titles are not queued. null/missing inherits
+        // base.
+        // enabled: Enable dramatic target titles. This never postpones attacks or adds recovery time.
+        // null/missing inherits base.
+        // text: Literal text, at most 80 characters; <player> becomes the actual account name. Default: RUN,
+        // <player>!. No JSON formatting or commands. null/missing inherits base.
+        // cooldown_ticks: Recipient cooldown, 20-1200 ticks; default 60. Also covers title display/fades. A
+        // new target bypasses an audience-only warning; recent personal warnings still throttle across bosses.
+        // null/missing inherits base.
+        // display_ticks: Hold title 1-100 ticks (default 20), plus 2-tick fade in and 4-tick fade out.
+        // null/missing inherits base.
+        "announcement": {
+          "enabled": null,
+          "text": null,
+          "cooldown_ticks": null,
+          "display_ticks": null
+        },
+        "min_target_ticks": null,
+        "min_attacks": null,
+        "max_attacks": null
+      },
+      // Sound defaults inherited by this phase's roar list; does not trigger a main-phase roar.
+      "roar": {
+        // Optional mono OGG in this template's sounds folder. Sent through the existing bounded media path and
+        // played at the boss. Blank file uses the vanilla roar.
+        // file: Lowercase OGG basename, no spaces or paths. Blank uses the native Warden roar; child/phase
+        // null inherits the parent sound.
+        // volume: Custom roar volume, 0-4; default 1.
+        // pitch: Custom roar pitch, 0.5-2; default 1.
+        // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+        "sound": {
+          "file": null,
+          "volume": null,
+          "pitch": null,
+          "range": null
+        }
+      },
+      // Optional 0-16 attack or recovery entries inside this health phase. Empty disables the sequence.
+      // Sequential follows file order; random shuffles every entry once per round. Recovery pauses attacks
+      // and movement. Main-phase entry/reload resets it; no nested children or health cutoffs.
+      "subphases": {
+      },
+      "subphase_order": "sequential",
+      "roar_between_subphases": true,
+      // Optional 0-16 roar sounds between subphases. Sequential cycles this list independently: one repeats,
+      // two alternate, four pair with four subphases. Random picks one per transition; roars may repeat. No
+      // missing-slot inheritance rule is needed.
+      "roars": {
+      }
+    }
+  },
+  // Boss bar after activation; /boss select arena <template> sets its shared visibility and
+  // player-effect area. No selected area means no bar.
+  // color: PINK, BLUE, RED, GREEN, YELLOW, PURPLE or WHITE.
+  // overlay: PROGRESS, NOTCHED_6, NOTCHED_10, NOTCHED_12 or NOTCHED_20.
+  "boss_bar": {
+    "color": "PURPLE",
+    "overlay": "NOTCHED_20",
+    // Infinite buffs only after activation, while inside the boss-bar area. Removed on exit/end;
+    // other-source effects take priority. Overlapping areas use highest level. Haste unsupported.
+    // enabled: Master switch for individually enabled buffs below.
+    "area_effects": {
+      "enabled": true,
+      // Speed: +20% movement per level.
+      // enabled: Enable this buff when the master switch is true.
+      // level: Effect level, 1-5 (1 = I); invalid/fractional values use 1.
+      "speed": {
+        "enabled": false,
+        "level": 1
+      },
+      // Jump Boost: increased jump height.
+      // enabled: Enable this buff when the master switch is true.
+      // level: Effect level, 1-5 (1 = I); invalid/fractional values use 1.
+      "jump_boost": {
+        "enabled": false,
+        "level": 1
+      },
+      // Regeneration: healing; higher levels heal more often.
+      // enabled: Enable this buff when the master switch is true.
+      // level: Effect level, 1-5 (1 = I); invalid/fractional values use 1.
+      "regeneration": {
+        "enabled": true,
+        "level": 1
+      },
+      // Strength: increased melee damage.
+      // enabled: Enable this buff when the master switch is true.
+      // level: Effect level, 1-5 (1 = I); invalid/fractional values use 1.
+      "strength": {
+        "enabled": false,
+        "level": 1
+      },
+      // Resistance: -20% affected damage per level; level V blocks all affected damage. Some damage bypasses
+      // it.
+      // enabled: Enable this buff when the master switch is true.
+      // level: Effect level, 1-5 (1 = I); invalid/fractional values use 1.
+      "resistance": {
+        "enabled": false,
+        "level": 1
+      }
+    },
+    // Who sees the bar and receives configured area effects after activation. Choose a saved box or a 3D
+    // radius that follows this Warden. The existing ten-tick watcher checks both; no additional timer.
+    // Missing box bounds leave box visibility unset.
+    // shape: "box": use saved min/max/dimension; "radius": use radius around the Warden, ignoring min/max.
+    // dimension: Dimension ID. Radius mode with an empty value follows the Warden in its current
+    // dimension; box mode requires the saved box dimension. A specified dimension restricts either mode.
+    // radius: Radius in blocks, 1-256 (default 32); used only for shape "radius". True 3D distance from
+    // the Warden position, not a horizontal cylinder.
+    "visibility_area": {
+      "shape": "box",
+      "dimension": "minecraft:overworld",
+      // Lower inclusive block corner: x, y, z.
+      // x: Block X coordinate, +/-30,000,000.
+      // y: Block Y coordinate, +/-30,000,000.
+      // z: Block Z coordinate, +/-30,000,000.
+      "min": {
+        "x": -74,
+        "y": 63,
+        "z": 98
+      },
+      // Upper inclusive block corner: x, y, z.
+      // x: Block X coordinate, +/-30,000,000.
+      // y: Block Y coordinate, +/-30,000,000.
+      // z: Block Z coordinate, +/-30,000,000.
+      "max": {
+        "x": -18,
+        "y": 83,
+        "z": 157
+      },
+      "radius": 32.0
+    },
+    // Active arena participants only. Raises maximum health to a minimum; armor that already grants more
+    // stays unchanged. Exit/reentry preserves the current health percentage.
+    // enabled: Enable the health minimum independently of beacon effects; default true in new templates.
+    // Missing section in older files is disabled.
+    // minimum_max_health: Minimum maximum HP, 1-1000; default 100 HP (50 hearts). This is a floor, not
+    // extra health added to armor.
+    // heal_on_first_entry: Fully heal once per player per encounter, including late arrivals. Reentry,
+    // reconnect and reload do not repeat it. Saved on the boss; capped at 4096 participants.
+    "player_health": {
+      "enabled": true,
+      "minimum_max_health": 100.0,
+      "heal_on_first_entry": true
+    },
+    // Give an owner-bound offhand potion during an active encounter. Uses normal drinking time; bottle is
+    // reusable. An occupied offhand moves into a free inventory slot; full inventory prevents the gift.
+    // enabled: Enable the potion independently of beacon effects and fight health. Default true in new
+    // templates; absent section is disabled.
+    // heal_hp: HP restored after drinking, 0-1000; default 20 HP (10 hearts). Cannot exceed current max
+    // health.
+    // cooldown_seconds: Time after a completed drink before another dose, 0.05-600 game seconds; default
+    // 15. Shared by all copies and overlapping encounters; survives exit, reconnect and respawn.
+    // hunger_restored: Hunger points added, whole number 0-20; default 20. Food level is capped at 20.
+    // saturation_restored: Saturation points added, 0-20; default 20. Saturation is capped at the
+    // resulting food level.
+    "reusable_potion": {
+      "enabled": true,
+      "heal_hp": 20.0,
+      "cooldown_seconds": 15.0,
+      "hunger_restored": 20,
+      "saturation_restored": 20.0
+    }
+  },
+  // Dormant trigger. Choose an entry box, an emergence-centered entry radius, or redstone. /boss select
+  // activation <template> saves a box; optional true also saves the boss-bar box. /boss activate <name>
+  // triggers manually. Existing occupants at spawn or after trigger edits must leave/reenter; uses the
+  // existing ten-tick watcher.
+  // type: "player_enter_area": saved-box entry; "player_enter_radius": radius entry; "redstone": rising
+  // signal.
+  // dimension: Dimension containing the trigger; empty uses the spawned boss dimension. Malformed
+  // dimension IDs disable the trigger.
+  // radius: Radius in blocks, 1-256 (default 32), used for type "player_enter_radius". True 3D distance
+  // from the saved emergence position; underground depth/scale does not move the trigger. Box min/max
+  // and shape are ignored in this mode.
+  "activation": {
+    "type": "redstone",
+    "dimension": "minecraft:overworld",
+    // Redstone trigger block: x, y, z.
+    // x: Block X coordinate, +/-30,000,000.
+    // y: Block Y coordinate, +/-30,000,000.
+    // z: Block Z coordinate, +/-30,000,000.
+    "position": {
+      "x": -54,
+      "y": 63,
+      "z": 133
+    },
+    "radius": 32.0
+  }
+}

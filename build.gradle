@@ -1,0 +1,146 @@
+plugins {
+    // Loom supplies the exact configured Minecraft/Fabric classes and development launchers.
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+loom {
+    // Client-only rendering/audio classes stay out of dedicated-server class loading.
+    splitEnvironmentSourceSets()
+
+    runs {
+        client {
+            runDir("run/client")
+        }
+    }
+
+    mods {
+        "clockwork_bosses" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+dependencies {
+    // Pin the user's 26.3 environment; do not rely on older mapped method names.
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+// Capture version properties during configuration, not inside a running task.
+def modResourceProperties = [version: project.version.toString(),
+        minecraft_version: project.minecraft_version.toString(),
+        loader_version: project.loader_version.toString(),
+        fabric_api_version: project.fabric_api_version.toString()]
+processResources {
+    inputs.properties(modResourceProperties)
+    filteringCharset = "UTF-8"
+    filesMatching("fabric.mod.json") { expand(modResourceProperties) }
+}
+
+def targetJavaVersion = 25
+// 26.3 runs on Java 25; both source sets and bundled mixins use the same target.
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+    options.release.set(targetJavaVersion)
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+    withSourcesJar()
+}
+
+// Native combat regressions are a separate development-only mod and disposable
+// GameTest world. Neither these classes nor their entrypoint enter the release jar.
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+    clientcheck {
+        compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.runtimeClasspath
+    }
+}
+loom {
+    mods {
+        "clockwork_bosses_regression" { sourceSet sourceSets.gametest }
+        "clockwork_bosses_clientcheck" { sourceSet sourceSets.clientcheck }
+    }
+    runs {
+        gametest {
+            server()
+            source sourceSets.gametest
+            name "Clockwork Boss combat regressions"
+            vmArg "-Dfabric-api.gametest"
+            vmArg "-Dfabric-api.gametest.report-file=${project.layout.buildDirectory.get().asFile}/combat-gametest.xml"
+            runDir "build/combat-gametest"
+            ideConfigGenerated false
+        }
+        clientcheck {
+            client()
+            source sourceSets.clientcheck
+            name "Clockwork Boss client keyframe checks"
+            runDir "build/client-check"
+            ideConfigGenerated false
+        }
+        clientlootcheck {
+            client()
+            source sourceSets.clientcheck
+            name "Clockwork Boss loot GUI checks"
+            runDir "build/loot-client-check"
+            vmArg "-Dfabric.client.gametest"
+            ideConfigGenerated false
+        }
+    }
+}
+
+def licenseArchiveName = "LICENSE_${project.archives_base_name}"
+jar {
+    from("LICENSE") { rename { licenseArchiveName } }
+}
+
+// Regression checks exercise production config/media helpers without launching Minecraft.
+// They use only existing runtime dependencies, so no testing framework is downloaded.
+tasks.register('auditChecks', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'clockwork.bosses.ClockworkBossAuditChecks'
+}
+check.dependsOn auditChecks
+
+// These regression checks use a standalone main, not a JUnit/TestNG engine.
+// Gradle 9 otherwise treats that intentional lack of framework tests as a failure.
+// auditChecks remains mandatory for check/build and fails on any assertion error.
+tasks.named('test') {
+    failOnNoDiscoveredTests = false
+}
+
+// A normally closed Minecraft process has exit code zero even if a client
+// assertion failed; require the explicit fixture result instead of masking it.
+tasks.named('runClientcheck') {
+    doFirst { java.nio.file.Files.deleteIfExists(layout.buildDirectory.file('client-check/client-check-result.txt').get().asFile.toPath()) }
+    doLast {
+        def result = layout.buildDirectory.file('client-check/client-check-result.txt').get().asFile
+        if (!result.isFile() || !result.text.startsWith('PASS:')) throw new GradleException('Native client keyframe checks did not pass')
+    }
+}
+
+// Fabric closes the temporary world/client; require explicit successful assertions as well as exit status.
+tasks.named('runClientlootcheck') {
+    doFirst { java.nio.file.Files.deleteIfExists(layout.buildDirectory.file('loot-client-check/loot-gui-check-result.txt').get().asFile.toPath()) }
+    doLast {
+        def result = layout.buildDirectory.file('loot-client-check/loot-gui-check-result.txt').get().asFile
+        if (!result.isFile() || !result.text.startsWith('PASS:')) throw new GradleException('Native loot GUI checks did not pass')
+    }
+}
+

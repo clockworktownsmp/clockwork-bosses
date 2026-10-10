@@ -1,0 +1,20 @@
+{
+  "required": true,
+  "package": "clockwork.bosses.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "WardenMixin",
+    "BossHealthAttributeMixin",
+    "BossMobSoundMixin",
+    "DiggingMixin",
+    "SonicBoomMixin",
+    "RoarMixin",
+    "PlayerSupportMixin",
+    "ServerPlayerDataMixin",
+    "BrainRecoveryMixin",
+    "BossLootMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

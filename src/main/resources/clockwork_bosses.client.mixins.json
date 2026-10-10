@@ -1,0 +1,18 @@
+{
+  "required": true,
+  "package": "clockwork.bosses.mixin.client",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "SoundManagerAccessor",
+    "SoundEngineAccessor",
+    "SoundEngineMixin",
+    "MusicManagerMixin",
+    "WardenRenderStateMixin",
+    "WardenRendererMixin",
+    "WardenModelMixin",
+    "LivingEntityEmissiveLayerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
