@@ -124,3 +124,6 @@ id_ed25519
 /*.tar.gz
 
 # Do not ignore src resources: bundled JSON, textures and OGG clips are build inputs.
+
+# Local agent instructions, at any directory depth.
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
