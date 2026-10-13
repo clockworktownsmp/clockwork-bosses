@@ -35,7 +35,7 @@ public record ClockworkBossSoundPayload(
     // and hyphens only. Directory separators, colons and leading dots are also
     // rejected; the server confines regular files to its fixed sound folder.
     private static final java.util.regex.Pattern FILE_NAME =
-            java.util.regex.Pattern.compile("[a-z0-9][a-z0-9._\\-]{0,63}\\.ogg");
+            java.util.regex.Pattern.compile(ClockworkBossTemplateText.OGG_FILE);
     private static final java.util.regex.Pattern REVISION =
             java.util.regex.Pattern.compile("[0-9a-f]{64}");
     private static final double MAX_SOUND_COORDINATE = 30_000_000.0;
@@ -97,7 +97,7 @@ public record ClockworkBossSoundPayload(
         oggBytes = oggBytes.clone();
         volume = Math.max(0.0F, Math.min(4.0F, volume));
         pitch = Math.max(0.5F, Math.min(2.0F, pitch));
-        range = Math.max(1.0F, Math.min(128.0F, range));
+        range = ClockworkBossSoundDistance.playback(range);
     }
 
     @Override

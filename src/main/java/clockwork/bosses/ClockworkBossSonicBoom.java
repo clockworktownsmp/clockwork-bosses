@@ -18,8 +18,12 @@ import net.minecraft.world.phys.Vec3;
 public final class ClockworkBossSonicBoom {
     private ClockworkBossSonicBoom() {}
 
-    /** New charges use the current phase; an existing charge uses its complete start-time definition. */
+    /** New charges use the current phase. An uninterrupted charge retains its
+     * complete start-time definition; action cleanup cancels an interrupted one. */
     public static void tick(Warden warden, ClockworkBossState state) {
+        if (state.actionRuntime() != null && !state.actionRuntime().allows(ClockworkBossActions.SONIC)) {
+            cancelCharge(warden, state); return;
+        }
         ServerLevel level = (ServerLevel) warden.level();
         ClockworkBossSettings.Phase phase = state.combatSettings();
         ClockworkBossSonicCharge charge = state.sonicCharge();
@@ -34,7 +38,8 @@ public final class ClockworkBossSonicBoom {
         // Close targets favor melee only when this phase actually permits melee.
         // Apply the same rule to charge entry and charge cancellation: moving
         // closer must not create a safe zone against a Sonic-Boom-only boss.
-        boolean yieldToMelee = (charge == null ? phase.meleeEnabled() : charge.yieldsToMelee()) && target != null
+        boolean yieldToMelee = (charge == null ? phase.meleeEnabled()
+                && (state.actionRuntime() == null || state.actionRuntime().allows(ClockworkBossActions.MELEE)) : charge.yieldsToMelee()) && target != null
                 && warden.isWithinMeleeAttackRange(target);
 
         if (charge != null) {
@@ -152,7 +157,7 @@ public final class ClockworkBossSonicBoom {
         ((ClockworkBossMarker) warden).clockworkBosses$finishSonicVisual(level.getGameTime());
 
         boolean capture = ClockworkBossDiagnostics.enabled();
-        float before = capture ? target.getHealth() : 0;
+        float before = target.getHealth();
         Vec3 velocity = capture ? target.getDeltaMovement() : null;
         if (capture) ClockworkBossDiagnostics.event(warden, target, "sonic_native_attempt", "hp_before", before, "damage", settings.damage(), "impact_eligible", true);
         boolean accepted = target.hurtServer(
@@ -161,6 +166,7 @@ public final class ClockworkBossSonicBoom {
                 (float) settings.damage()
         );
         if (accepted) {
+            ClockworkBossManager.onAttackLanded(warden, target, ClockworkBossActions.SONIC, Math.max(0, before - target.getHealth()));
             ClockworkBossManager.onSuccessfulAttack(warden);
             double resistance = Math.max(
                     0.0,

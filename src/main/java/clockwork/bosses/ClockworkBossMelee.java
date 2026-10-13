@@ -33,8 +33,10 @@ public final class ClockworkBossMelee {
         return true;
     }
 
-    /** Target/phase/reload changes cancel instead of granting a delayed hit on
-     * another player. No chunks are loaded and no entity reference is retained. */
+    /** Keep the captured deadline while either combatant moves. Target ownership
+     * and phase validity are checked throughout; reach and visibility are checked
+     * only at impact so a brief separation cannot restart the wind-up. Native
+     * navigation continues unchanged. No chunks or entity references are retained. */
     public static boolean tick(Warden boss, ClockworkBossState state) {
         Pending pending = state.pendingMelee();
         if (pending == null) return false;
@@ -44,12 +46,17 @@ public final class ClockworkBossMelee {
         if (pending.generation() != state.subphaseGeneration() || state.dormant() || state.emerging() || state.roarInterlude()
                 || !(entity instanceof LivingEntity target) || current != target || !target.isAlive() || target.isRemoved()
                 || target instanceof net.minecraft.server.level.ServerPlayer player && player.hasDisconnected()
-                || !boss.canTargetEntity(target) || !boss.isWithinMeleeAttackRange(target)
-                || !boss.getSensing().hasLineOfSight(target)) {
+                || !boss.canTargetEntity(target)) {
             cancel(boss, state); return false;
         }
         boss.getLookControl().setLookAt(target.position());
         if (level.getGameTime() < pending.dueTick()) return true;
+        // Commit damage against current positions, never the positions captured
+        // at the start. An escaped/hidden opponent receives no hit, and clearing
+        // this pending swing prevents it from landing later when they return.
+        if (!boss.isWithinMeleeAttackRange(target) || !boss.getSensing().hasLineOfSight(target)) {
+            cancel(boss, state); return false;
+        }
         if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(boss, target, "melee_impact_eligible",
                 "due_tick", pending.dueTick(), "same_target", true, "range", true, "line_of_sight", true);
         state.setPendingMelee(null); state.setResolvingMeleeSettings(pending.settings());

@@ -1,0 +1,5 @@
+The merged Clockwork Bosses jar bundles the unmodified `org.jcraft:jorbis:0.0.17` library (JOrbis and Jogg), copyright JCraft, under the GNU Lesser General Public License version 2.1 or later. The license is included in `licenses/jorbis-LGPL-2.1.txt`. JOrbis validates workshop uploads on a file worker; it never plays audio or runs on the Minecraft tick thread.
+
+Source: https://github.com/ymnk/jorbis and https://repo.maven.apache.org/maven2/org/jcraft/jorbis/0.0.17/jorbis-0.0.17-sources.jar . The unmodified dependency is a separate, replaceable nested jar under `META-INF/jars/`. This source distribution contains the companion code and build instructions, so users can rebuild with a modified or replacement decoder. No restriction is imposed on modification or reverse engineering needed to debug changes to this library.
+
+The `silent-vorbis.b64` test fixture contains generated silence, generic Vorbis codec setup, and an empty metadata comment. It contains no recorded or preset audio. It is excluded from the runtime jar.

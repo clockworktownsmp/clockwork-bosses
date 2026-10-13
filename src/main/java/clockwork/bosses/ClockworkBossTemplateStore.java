@@ -24,7 +24,7 @@ import java.util.List;
  */
 public final class ClockworkBossTemplateStore {
     // Bound disk reads even if an administrator accidentally selects a huge file.
-    private static final long MAX_TEMPLATE_BYTES = 512 * 1024;
+    private static final long MAX_TEMPLATE_BYTES = ClockworkBossTemplateFormat.MAX_BYTES;
     private static volatile List<String> cachedTemplates = List.of();
     private static volatile List<String> cachedPresets = List.of();
     private static final Path CONFIG_ROOT = FabricLoader.getInstance()
@@ -248,12 +248,19 @@ public final class ClockworkBossTemplateStore {
         JsonObject updated = expected.deepCopy();
         for (var entry : patch.entrySet()) {
             if (ClockworkBossEditorSchema.orderField(entry.getKey())) continue;
+            if (entry.getKey().equals(ClockworkBossActionEditor.CATALOG) || entry.getKey().startsWith(ClockworkBossActionEditor.CATALOG + "."))
+                throw new IOException("Action definitions are supplied by the server, not editable fields");
             if (entry.getKey().length() > 256 || ClockworkBossEditorSchema.get(updated, entry.getKey()) == null) throw new IOException("Unknown editor field");
+            if (ClockworkBossActionEditor.typePath(entry.getKey())
+                    && !entry.getValue().equals(ClockworkBossEditorSchema.get(expected, entry.getKey())))
+                throw new IOException("Change action types through the action selection operation");
             ClockworkBossEditorSchema.put(updated, entry.getKey(), entry.getValue());
         }
         ClockworkBossEditorSchema.validate(expected, updated);
         if (updated.toString().length() > ClockworkBossEditorPayload.MAX_JSON_CHARS) throw new IOException("Document is too large for the GUI");
         JsonObject persisted = current.stored().deepCopy();
+        persisted.remove(ClockworkBossActionEditor.CATALOG);
+        persisted.remove(ClockworkBossActionEditor.TYPES);
         if ((!persisted.has("phases") || !persisted.get("phases").isJsonObject())
                 && patch.keySet().stream().anyMatch(key -> key.startsWith("phases.")
                 || ClockworkBossEditorSchema.orderField(key) && !key.equals("_loot_entry_order")))
@@ -316,7 +323,7 @@ public final class ClockworkBossTemplateStore {
      * Copy only direct validated media in the three supported categories; cap both
      * file count and total bytes so a large preset cannot queue unlimited disk work.
      */
-    public static void createFromPreset(String presetName, String templateName) throws Exception {
+    public static synchronized void createFromPreset(String presetName, String templateName) throws Exception {
         validateName(presetName);
         validateName(templateName);
         ensureDirectory();
@@ -411,6 +418,14 @@ public final class ClockworkBossTemplateStore {
         refreshCache();
     }
 
+    /** Read-modify-write transaction for selection/spawn edits. The worker holds
+     * the same monitor used by native editor saves and workshop publication, so
+     * another writer cannot overwrite unrelated fields between load and save.
+     * The edit callback must be pure JSON work and must never access Minecraft. */
+    public static synchronized void edit(String templateName, java.util.function.Consumer<JsonObject> edit) throws Exception {
+        JsonObject config = load(templateName); edit.accept(config); save(templateName, config);
+    }
+
     /** Autocomplete reads a snapshot only; no folder checks or other filesystem work. */
     public static List<String> list() {
         return cachedTemplates;
@@ -422,13 +437,28 @@ public final class ClockworkBossTemplateStore {
      * providers such as mounted SFTP may only support an ordinary rename.
      */
     private static void writeFile(Path destination, JsonObject config, boolean replaceExisting) throws Exception {
+        byte[] content = ClockworkBossTemplateDocument.write(config).getBytes(StandardCharsets.UTF_8);
+        writeBytes(destination, content, replaceExisting);
+    }
+
+    /** One explicit operator export includes installed addon descriptors without
+     * reading private templates. No watcher, network download or recurring work. */
+    public static synchronized Path exportSchema() throws Exception {
+        createOwnedDirectory(CONFIG_ROOT);
+        Path destination = CONFIG_ROOT.resolve("template-schema.json");
+        writeBytes(destination, ClockworkBossTemplateSchema.write().getBytes(StandardCharsets.UTF_8), true);
+        return destination;
+    }
+
+    /** Templates and schema exports share the same bounded, atomic publication
+     * path. Only callers choose destinations inside this mod's config root. */
+    private static void writeBytes(Path destination, byte[] content, boolean replaceExisting) throws Exception {
         checkOwnedPath(destination);
         if (Files.isSymbolicLink(destination)) {
             throw new IllegalArgumentException("Template cannot be a symbolic link");
         }
-        byte[] content = ClockworkBossTemplateDocument.write(config).getBytes(StandardCharsets.UTF_8);
         if (content.length > MAX_TEMPLATE_BYTES) {
-            throw new IllegalArgumentException("Template exceeds the 512 KiB size limit");
+            throw new IllegalArgumentException("Config document exceeds the 512 KiB size limit");
         }
         // Stage beside the actual destination, including optional preset files,
         // so a mounted folder uses its own file provider for the final rename.
@@ -484,12 +514,7 @@ public final class ClockworkBossTemplateStore {
         Path root = CONFIG_ROOT.toAbsolutePath().normalize();
         Path target = path.toAbsolutePath().normalize();
         if (!target.startsWith(root)) throw new IOException("Path is outside Clockwork Bosses config");
-        Path component = root;
-        if (Files.isSymbolicLink(component)) throw new IOException("Config root must not be a symbolic link");
-        for (Path part : root.relativize(target)) {
-            component = component.resolve(part);
-            if (Files.isSymbolicLink(component)) throw new IOException("Config paths must not contain symbolic links");
-        }
+        clockwork.bosses.files.ClockworkBossPaths.checkAncestors(target);
     }
 
     /** Validates before constructing a path, including exists/autocomplete callers. */

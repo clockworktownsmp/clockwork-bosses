@@ -6,9 +6,11 @@ import java.math.BigDecimal;
  * A short exponent such as 1e-2000000000 must not expand into gigabytes of text.
  * Normal decimal/scientific notation remains exact; no rounding changes saved values. */
 public final class ClockworkBossNumbers {
-    private static final int MAX_TEXT = 128;
-    private static final int MAX_PRECISION = 64;
-    private static final int MAX_SCALE = 64;
+    // Export these same input limits for offline editors; do not maintain a
+    // second website list. They apply to declared edits, not opaque addon data.
+    public static final int MAX_TEXT = 128;
+    public static final int MAX_PRECISION = 64;
+    public static final int MAX_SCALE = 64;
 
     private ClockworkBossNumbers() {}
 

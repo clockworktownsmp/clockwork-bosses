@@ -3,6 +3,8 @@
 // Empty sound filenames disable events; an empty roar filename uses the vanilla roar.
 // /boss reload applies edited settings to loaded bosses.
 {
+  // Format revision is written automatically; do not change it manually.
+  "format_version": 1,
   // Template-wide item rewards, once on real death, including environmental deaths. Respects doMobLoot.
   // Removal, reset and /kill do not pay. Empty entries give no custom rewards.
   // enabled: false preserves existing drops. Reload applies saved settings to loaded bosses.
@@ -64,6 +66,19 @@
       "left_y": 7,
       "right_x": 11,
       "right_y": 7
+    },
+    // Pupil offsets are inside each eye, so they move with it. -1 uses the inner X/bottom Y edge.
+    // enabled: show darker pupil rectangles; false keeps the eye bright.
+    // scale_x / scale_y: independent size, 0.5-8; 1 = one pixel, rounded and clipped to the eye.
+    // left_x / left_y / right_x / right_y: whole offsets -1 to 7; 0 = eye's top-left, -1 = automatic.
+    "glowing_pupils": {
+      "enabled": true,
+      "scale_x": 1.0,
+      "scale_y": 1.0,
+      "left_x": -1,
+      "left_y": -1,
+      "right_x": -1,
+      "right_y": -1
     }
   },
   // Per-template spawn saved by /boss setspawn <template>. X/Z bounded to +/-30,000,000; Y to build
@@ -133,12 +148,12 @@
     // file: Exact OGG filename, e.g. boss_phase.ogg; "" disables.
     // volume: Volume multiplier, 0-4; also follows the client Hostile slider.
     // pitch: Pitch multiplier, 0.5-2.
-    // range: Audible distance in blocks, 1-128.
+    // range: 0 = automatic arena diagonal/radius (32 without an arena); positive distance is manual, capped at 512 blocks.
     "spawn": {
       "file": "spawn.ogg",
       "volume": 1.0,
       "pitch": 1.0,
-      "range": 32.0
+      "range": 0.0
     },
     // Shared fallback for actual phase transitions; initial spawn/reload phase assignment plays no phase
     // sound. Null/missing phase fields inherit; an explicit filename wins even if missing. An empty phase
@@ -146,23 +161,23 @@
     // file: Exact OGG filename, e.g. boss_phase.ogg; "" disables.
     // volume: Volume multiplier, 0-4; also follows the client Hostile slider.
     // pitch: Pitch multiplier, 0.5-2.
-    // range: Audible distance in blocks, 1-128.
+    // range: 0 = automatic arena diagonal/radius (32 without an arena); positive distance is manual, capped at 512 blocks.
     "phase_change": {
       "file": "",
       "volume": 1.0,
       "pitch": 1.0,
-      "range": 32.0
+      "range": 0.0
     },
     // Plays when the boss dies; /boss remove does not play it.
     // file: Exact OGG filename, e.g. boss_phase.ogg; "" disables.
     // volume: Volume multiplier, 0-4; also follows the client Hostile slider.
     // pitch: Pitch multiplier, 0.5-2.
-    // range: Audible distance in blocks, 1-128.
+    // range: 0 = automatic arena diagonal/radius (32 without an arena); positive distance is manual, capped at 512 blocks.
     "death": {
       "file": "death.ogg",
       "volume": 1.0,
       "pitch": 1.0,
-      "range": 32.0
+      "range": 0.0
     },
     "mob_volume": 0.25
   },
@@ -200,13 +215,13 @@
   // chance: Probability per eligible successful hit, 0-1; 0.25 = 25%. Busy voices skip the roll.
   // volume: Volume multiplier, 0-4; follows the client Hostile slider.
   // pitch: Pitch multiplier, 0.5-2; adjusts the non-overlap duration too.
-  // range: Audible distance in blocks, 1-128.
+  // range: 0 = automatic arena diagonal/radius (32 without an arena); positive distance is manual, capped at 512 blocks.
   "voice_lines": {
     "enabled": true,
     "chance": 0.25,
     "volume": 1.0,
     "pitch": 1.0,
-    "range": 32.0
+    "range": 0.0
   },
   // Completed swings and fired beams count toward target rotation. Hold time and minimum attacks gate
   // chance rolls; the maximum forces a different eligible opponent. Solo fights keep their target.
@@ -306,12 +321,12 @@
       // null inherits the parent sound.
       // volume: Custom roar volume, 0-4; default 1.
       // pitch: Custom roar pitch, 0.5-2; default 1.
-      // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+      // range: 0 = automatic arena diagonal/radius (default); positive distance is manual, capped at 512 blocks. Null phase/child values inherit.
       "sound": {
         "file": "",
         "volume": 1.0,
         "pitch": 1.0,
-        "range": 32.0
+        "range": 0.0
       }
     }
   },
@@ -378,7 +393,7 @@
         // disables.
         // volume: Volume multiplier, 0-4; null inherits.
         // pitch: Pitch multiplier, 0.5-2; null inherits.
-        // range: Audible distance in blocks, 1-128; null inherits.
+        // range: 0: automatic arena radius/box diagonal; positive: manual blocks, maximum 512; null inherits.
         "phase_change": {
           "file": "",
           "volume": null,
@@ -520,7 +535,7 @@
         // null inherits the parent sound.
         // volume: Custom roar volume, 0-4; default 1.
         // pitch: Custom roar pitch, 0.5-2; default 1.
-        // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+        // range: 0 = automatic arena diagonal/radius (default); positive distance is manual, capped at 512 blocks. Null phase/child values inherit.
         "sound": {
           "file": null,
           "volume": null,
@@ -567,7 +582,7 @@
         // disables.
         // volume: Volume multiplier, 0-4; null inherits.
         // pitch: Pitch multiplier, 0.5-2; null inherits.
-        // range: Audible distance in blocks, 1-128; null inherits.
+        // range: 0: automatic arena radius/box diagonal; positive: manual blocks, maximum 512; null inherits.
         "phase_change": {
           "file": "phase2.ogg",
           "volume": null,
@@ -709,7 +724,7 @@
         // null inherits the parent sound.
         // volume: Custom roar volume, 0-4; default 1.
         // pitch: Custom roar pitch, 0.5-2; default 1.
-        // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+        // range: 0 = automatic arena diagonal/radius (default); positive distance is manual, capped at 512 blocks. Null phase/child values inherit.
         "sound": {
           "file": null,
           "volume": null,
@@ -756,7 +771,7 @@
         // disables.
         // volume: Volume multiplier, 0-4; null inherits.
         // pitch: Pitch multiplier, 0.5-2; null inherits.
-        // range: Audible distance in blocks, 1-128; null inherits.
+        // range: 0: automatic arena radius/box diagonal; positive: manual blocks, maximum 512; null inherits.
         "phase_change": {
           "file": "phase3.ogg",
           "volume": null,
@@ -898,7 +913,7 @@
         // null inherits the parent sound.
         // volume: Custom roar volume, 0-4; default 1.
         // pitch: Custom roar pitch, 0.5-2; default 1.
-        // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+        // range: 0 = automatic arena diagonal/radius (default); positive distance is manual, capped at 512 blocks. Null phase/child values inherit.
         "sound": {
           "file": null,
           "volume": null,
@@ -942,7 +957,7 @@
         // disables.
         // volume: Volume multiplier, 0-4; null inherits.
         // pitch: Pitch multiplier, 0.5-2; null inherits.
-        // range: Audible distance in blocks, 1-128; null inherits.
+        // range: 0: automatic arena radius/box diagonal; positive: manual blocks, maximum 512; null inherits.
         "phase_change": {
           "file": "phase4.ogg",
           "volume": null,
@@ -1084,7 +1099,7 @@
         // null inherits the parent sound.
         // volume: Custom roar volume, 0-4; default 1.
         // pitch: Custom roar pitch, 0.5-2; default 1.
-        // range: Custom roar hearing/delivery radius, 1-128 blocks; default 32.
+        // range: 0 = automatic arena diagonal/radius (default); positive distance is manual, capped at 512 blocks. Null phase/child values inherit.
         "sound": {
           "file": null,
           "volume": null,

@@ -15,6 +15,9 @@ public abstract class WardenRenderStateMixin implements WardenRenderStateVisuals
     @Unique private int clockworkBosses$brows = clockwork.bosses.ClockworkBossBrows.DEFAULT.packed();
     @Override public int clockworkBosses$getBrows() { return clockworkBosses$brows; }
     @Override public void clockworkBosses$setBrows(int coordinates) { clockworkBosses$brows = coordinates; }
+    @Unique private int clockworkBosses$pupils = clockwork.bosses.ClockworkBossPupils.DEFAULT.packed();
+    @Override public int clockworkBosses$getPupils() { return clockworkBosses$pupils; }
+    @Override public void clockworkBosses$setPupils(int settings) { clockworkBosses$pupils = settings; }
     @Unique private boolean clockworkBosses$editorPreview;
     @Override public boolean clockworkBosses$isEditorPreview() { return clockworkBosses$editorPreview; }
     @Override public void clockworkBosses$setEditorPreview(boolean preview) { clockworkBosses$editorPreview = preview; }

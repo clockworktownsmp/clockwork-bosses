@@ -8,6 +8,11 @@ import net.minecraft.core.BlockPos;
  * render the same skin, glow color, and phase flash as the server selected.
  */
 public interface ClockworkBossMarker {
+    /** Internal metadata layout shared by Wardens; tracking uses it for clients without this mod. */
+    ClockworkBossClientData clockworkBosses$getClientDataLayout();
+    /** Recovery journal for an interrupted core burrow, saved independently of runtime actions. */
+    ClockworkBossBurrowCheckpoint clockworkBosses$getBurrowCheckpoint();
+    void clockworkBosses$setBurrowCheckpoint(ClockworkBossBurrowCheckpoint checkpoint);
     /** Saved, bounded UUID ledger prevents reentry/reconnect/reload full-heal farming. */
     boolean clockworkBosses$claimInitialHeal(java.util.UUID player);
     /** Capture melee wind-up/recovery once per swing, never per render frame. */
@@ -20,6 +25,9 @@ public interface ClockworkBossMarker {
     void clockworkBosses$setEyes(int coordinates);
     int clockworkBosses$getBrows();
     void clockworkBosses$setBrows(int coordinates);
+    /** Pupil rectangles are relative to the eyes and synchronized only when settings change. */
+    int clockworkBosses$getPupils();
+    void clockworkBosses$setPupils(int settings);
     /** Server-owned identity; the synced accessor reads the corresponding client metadata field. */
     boolean clockworkBosses$isClockworkBoss();
     boolean clockworkBosses$isClockworkBossSynced();

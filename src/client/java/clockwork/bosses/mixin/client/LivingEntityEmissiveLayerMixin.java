@@ -44,7 +44,7 @@ public abstract class LivingEntityEmissiveLayerMixin {
         }
 
         Identifier maskTexture = WardenEmissiveMaskTexture.getTexture(sourceTexture, visuals.clockworkBosses$getEyes(),
-                visuals.clockworkBosses$getBrows(), visuals.clockworkBosses$isEditorPreview());
+                visuals.clockworkBosses$getBrows(), visuals.clockworkBosses$getPupils(), visuals.clockworkBosses$isEditorPreview());
         previewFace.set(maskTexture != null && visuals.clockworkBosses$isEditorPreview()
                 && sourceTexture.getPath().equals("textures/entity/warden/warden_bioluminescent_layer.png"));
         // Tint only when we supplied a white mask. Foreign layers and failed

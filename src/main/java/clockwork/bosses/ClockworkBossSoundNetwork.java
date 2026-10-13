@@ -33,6 +33,8 @@ public final class ClockworkBossSoundNetwork {
     // Startup/reload snapshot: attacks never scan a directory. Invalid selected
     // files are removed until reload, avoiding repeated disk errors/log spam.
     private static final Map<String, List<String>> VOICE_FILES = new HashMap<>();
+    private static final Map<String, Object> VOICE_PENDING = new HashMap<>();
+    private static net.minecraft.server.MinecraftServer mediaServer;
     private static final ClockworkBossMediaCache<CachedSound> SOUND_FILES = new ClockworkBossMediaCache<>();
     private static final Map<UUID, LinkedHashMap<String, Boolean>> SENT_TO_PLAYERS = new HashMap<>();
 
@@ -48,7 +50,8 @@ public final class ClockworkBossSoundNetwork {
                 SENT_TO_PLAYERS.remove(handler.player.getUUID());
             }
         });
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> clearCaches());
+        ServerLifecycleEvents.SERVER_STARTING.register(server -> mediaServer = server);
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> { mediaServer = null; clearCaches(); });
         // Entity-load callbacks can prepare catalogs before SERVER_STARTED.
         // Shutdown already clears them; clearing again at startup would lose
         // those loaded bosses' voice lists. Each template prepares on registration.
@@ -60,6 +63,7 @@ public final class ClockworkBossSoundNetwork {
             SOUND_FILES.clear();
             ClockworkBossMediaTransfers.invalidateWaiting();
             VOICE_FILES.clear();
+            VOICE_PENDING.clear();
         }
     }
 
@@ -71,12 +75,21 @@ public final class ClockworkBossSoundNetwork {
     /** The manager releases a catalog when its last loaded boss leaves; audio caches stay bounded separately. */
     public static void releaseTemplate(String templateName) {
         VOICE_FILES.remove(templateName);
+        VOICE_PENDING.remove(templateName);
     }
 
     /** Warm the small event-file set when a template is loaded, before its first activation/attack. */
     public static void prepareTemplate(String templateName, com.google.gson.JsonObject template) {
         // Only loaded templates acquire catalogs; reload/shutdown clears them.
-        VOICE_FILES.computeIfAbsent(templateName, ClockworkBossSoundNetwork::readVoiceFiles);
+        if (mediaServer != null && !VOICE_FILES.containsKey(templateName) && !VOICE_PENDING.containsKey(templateName)) {
+            Object token = new Object(); VOICE_PENDING.put(templateName, token);
+            // Capture only a name for the worker. Ownership tokens suppress an
+            // old result after reload, last-boss unload or server shutdown.
+            boolean queued = ClockworkBossTemplateTasks.submit(mediaServer, () -> readVoiceFiles(templateName), (files, failure) -> {
+                if (VOICE_PENDING.remove(templateName, token)) VOICE_FILES.put(templateName, failure == null ? files : List.of());
+            });
+            if (!queued) VOICE_PENDING.remove(templateName, token);
+        }
         var names = new java.util.LinkedHashSet<String>();
         var sounds = child(template, "sounds");
         for (String event : List.of("spawn", "death", "phase_change")) {
@@ -93,6 +106,14 @@ public final class ClockworkBossSoundNetwork {
             child(parent, "roars").entrySet().stream().limit(ClockworkBossSubphases.MAX_SUBPHASES)
                     .filter(entry -> entry.getValue().isJsonObject())
                     .forEach(entry -> addFile(names, child(entry.getValue().getAsJsonObject(), "sound")));
+            // Registered core roar actions use their own declared settings.
+            // Prefetch their explicit cue through the same bounded media cache.
+            child(parent, "subphases").entrySet().stream().limit(ClockworkBossSubphases.MAX_SUBPHASES)
+                    .filter(entry -> entry.getValue().isJsonObject())
+                    .map(entry -> entry.getValue().getAsJsonObject())
+                    .filter(child -> child.has("type") && child.get("type").isJsonPrimitive()
+                            && ClockworkBossActions.ROAR.toString().equals(child.get("type").getAsString()))
+                    .forEach(child -> addFile(names, child(child, "action_settings")));
         }
         for (String name : names) SOUND_FILES.request(ClockworkBossSoundPayload.soundIdentity(templateName, name, false),
                 () -> loadSound(templateName, name, false));
@@ -222,6 +243,10 @@ public final class ClockworkBossSoundNetwork {
     /** One bounded native spatial query per played event, with shared audio cache delivery. */
     private static int sendSound(SoundOrigin origin, String fileName, CachedSound sound,
                                   float volume, float pitch, float range, boolean voiceLine) {
+        // Defense before the native spatial query as well as the packet constructor.
+        // Manager resolves Auto; this boundary accepts only finite, bounded playback distances.
+        if (!Float.isFinite(range)) return 0;
+        range = ClockworkBossSoundDistance.playback(range);
         ServerLevel level = origin.level();
         int recipients = 0;
         double x = origin.x();
@@ -373,6 +398,7 @@ public final class ClockworkBossSoundNetwork {
         synchronized (ClockworkBossSoundNetwork.class) {
             SOUND_FILES.clear();
             VOICE_FILES.clear();
+            VOICE_PENDING.clear();
         }
         synchronized (SENT_TO_PLAYERS) {
             SENT_TO_PLAYERS.clear();

@@ -1,5 +1,6 @@
 package clockwork.bosses;
 
+import clockwork.bosses.ClockworkBossPermissions.Action;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -9,7 +10,6 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.permissions.Permissions;
 import net.minecraft.util.Util;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -25,6 +25,7 @@ public final class ClockworkBossTemplateEditor {
     private static final Map<UUID, Session> SESSIONS = new HashMap<>();
     private static final Set<String> DELETING = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static final AtomicInteger JOBS = new AtomicInteger();
+    private static long deletionEpoch; // Native thread only; no growing per-file tombstone cache.
     private static final long LIFETIME = java.time.Duration.ofMinutes(30).toNanos();
     private ClockworkBossTemplateEditor() {}
 
@@ -51,6 +52,12 @@ public final class ClockworkBossTemplateEditor {
     public static int open(CommandSourceStack source, String name, boolean preset) {
         ServerPlayer player = source.getPlayer();
         if (player == null) { source.sendFailure(Component.literal("Open the template editor from an in-game player.")); return 0; }
+        if (name.isEmpty()) {
+            if (!ClockworkBossPermissions.canEdit(source)) {
+                source.sendFailure(Component.literal("Opening the editor requires template or preset edit permission."));
+                return 0;
+            }
+        } else if (!ClockworkBossPermissions.documentAction(preset).require(source)) return 0;
         if (!ServerPlayNetworking.canSend(player, ClockworkBossEditorPayload.TYPE)) {
             source.sendFailure(Component.literal("Install the editor build of Clockwork Bosses on your client.")); return 0;
         }
@@ -67,18 +74,21 @@ public final class ClockworkBossTemplateEditor {
         return 1;
     }
 
-    private static boolean allowed(ServerPlayer player) {
-        return player.createCommandSourceStack().permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER);
+    /** File kind comes from the request being opened or the established server session when saving. */
+    private static boolean requireEdit(ServerPlayer player, Session session, boolean preset) {
+        Action action = ClockworkBossPermissions.documentAction(preset);
+        if (action.allowed(player.createCommandSourceStack())) return true;
+        error(player, session, "Missing permission: " + action.dottedName());
+        return false;
     }
 
     /** Check authority/token on every request; a malicious client cannot choose a server path. */
     private static void receive(ServerPlayer player, ClockworkBossEditorPayload payload) {
         Session session = SESSIONS.get(player.getUUID());
         if (session == null || !session.token.equals(payload.token())) return;
-        // A de-opped player may still close their own session. All operational
+        // A player with revoked permissions may still close their own session. All operational
         // actions retain the permission check; closing grants no file access.
         if (payload.action().equals("close")) { SESSIONS.remove(player.getUUID()); return; }
-        if (!allowed(player)) return;
         if (session.expires < System.nanoTime()) { error(player, session, "Editor session expired. Reopen /boss template edit."); SESSIONS.remove(player.getUUID()); return; }
         // Native custom serverbound packets are small. Reject oversized patches before parsing or scheduling I/O.
         if (session.busy || payload.json().getBytes(StandardCharsets.UTF_8).length > ClockworkBossEditorPayload.MAX_PATCH_BYTES) return;
@@ -88,8 +98,11 @@ public final class ClockworkBossTemplateEditor {
         session.expires = now + LIFETIME;
         if (payload.action().equals("open")) load(player, session, payload.name(), payload.preset());
         else if (payload.action().equals("reload")) {
-            ClockworkBossManager.reload(player.createCommandSourceStack());
-            send(player, session, "reloaded", "Reload finished. Check chat for any template or asset errors.");
+            if (!Action.RELOAD.allowed(player.createCommandSourceStack())) {
+                error(player, session, "Missing permission: " + Action.RELOAD.dottedName());
+            } else if (ClockworkBossManager.reloadAsync(player.createCommandSourceStack()) > 0) {
+                send(player, session, "reloaded", "Reload queued. Chat will report when settings are applied.");
+            } else error(player, session, "Reload failed. Check chat for details.");
         }
         else if (payload.action().equals("skin") && !session.name.isEmpty()) previewSkin(player, session, payload.json());
         else if (payload.action().equals("save") && session.name.equals(payload.name())
@@ -99,13 +112,16 @@ public final class ClockworkBossTemplateEditor {
     private static void catalog(ServerPlayer player, Session session) {
         JsonObject catalog = new JsonObject();
         JsonArray templates = new JsonArray(), presets = new JsonArray();
-        ClockworkBossTemplateStore.list().stream().limit(256).forEach(templates::add);
-        ClockworkBossTemplateStore.presets().stream().limit(256).forEach(presets::add);
+        // Showing one editable kind never grants access to the other kind's files.
+        var source = player.createCommandSourceStack();
+        if (Action.TEMPLATE_EDIT.allowed(source)) ClockworkBossTemplateStore.list().stream().limit(256).forEach(templates::add);
+        if (Action.PRESET_EDIT.allowed(source)) ClockworkBossTemplateStore.presets().stream().limit(256).forEach(presets::add);
         catalog.add("templates", templates); catalog.add("presets", presets);
         send(player, session, "catalog", catalog.toString());
     }
 
     private static void load(ServerPlayer player, Session session, String name, boolean preset) {
+        if (!requireEdit(player, session, preset)) return;
         if (!ClockworkBossTemplateNames.isValid(name) || !preset && DELETING.contains(name)) { error(player, session, "Invalid or deleting template."); return; }
         if (!acquire(player, session)) return;
         var server = player.level().getServer();
@@ -117,6 +133,7 @@ public final class ClockworkBossTemplateEditor {
             server.execute(() -> {
                 if (!current(player, session)) return;
                 session.busy = false;
+                if (!requireEdit(player, session, preset)) return;
                 if (failure != null) { error(player, session, reason(failure)); return; }
                 session.name = name; session.preset = preset; session.revision = document.revision();
                 send(player, session, "document", document.config().toString());
@@ -125,6 +142,7 @@ public final class ClockworkBossTemplateEditor {
     }
 
     private static void save(ServerPlayer player, Session session, String patchText) {
+        if (!requireEdit(player, session, session.preset)) return;
         if (!session.preset && DELETING.contains(session.name)) { error(player, session, "This template is being deleted."); return; }
         if (!acquire(player, session)) return;
         // Capture before leaving the server thread; worker tasks never read mutable session state.
@@ -142,6 +160,7 @@ public final class ClockworkBossTemplateEditor {
             server.execute(() -> {
                 if (!current(player, session)) return;
                 session.busy = false;
+                if (!requireEdit(player, session, preset)) return;
                 if (failure != null) { error(player, session, reason(failure)); return; }
                 session.revision = document.revision();
                 // Saving is deliberately separate from /boss reload; a form edit cannot restart a live encounter.
@@ -151,11 +170,14 @@ public final class ClockworkBossTemplateEditor {
     }
 
     private static boolean current(ServerPlayer player, Session session) {
-        return SESSIONS.get(session.player) == session && player.level().getServer().getPlayerList().getPlayer(session.player) == player && allowed(player);
+        // Identity and authorization are separate so a denied completion can release
+        // busy state. A write accepted before revocation may finish on its I/O worker.
+        return SESSIONS.get(session.player) == session && player.level().getServer().getPlayerList().getPlayer(session.player) == player;
     }
 
     /** Custom preview reuses the validated PNG/chunk path with an isolated identity, not a live boss texture key. */
     private static void previewSkin(ServerPlayer player, Session session, String file) {
+        if (!requireEdit(player, session, session.preset)) return;
         if (!CustomWardenSkinPayload.isValidFileName(file)) { error(player, session, "Invalid PNG filename."); return; }
         if (!acquire(player, session)) return;
         String name = session.name; boolean preset = session.preset;
@@ -170,8 +192,10 @@ public final class ClockworkBossTemplateEditor {
             server.execute(() -> {
                 if (!current(player, session)) return;
                 session.busy = false;
+                if (!requireEdit(player, session, preset)) return;
                 if (failure != null) { error(player, session, reason(failure)); return; }
-                boolean queued = ClockworkBossMediaTransfers.send(player, "editor-skin:" + session.token + ":" + file, transfer, () -> {}, () -> false, () -> current(player, session));
+                boolean queued = ClockworkBossMediaTransfers.send(player, "editor-skin:" + session.token + ":" + file, transfer, () -> {}, () -> false,
+                        () -> current(player, session) && ClockworkBossPermissions.documentAction(preset).allowed(player.createCommandSourceStack()));
                 if (queued) send(player, session, "preview_ready", file);
                 else error(player, session, "Skin transfer is busy. Try Preview again shortly.");
             });
@@ -192,15 +216,18 @@ public final class ClockworkBossTemplateEditor {
     private static String reason(Throwable failure) { while (failure.getCause() != null) failure = failure.getCause(); return failure.getMessage() == null ? "Could not access the template file." : failure.getMessage(); }
 
     public static boolean isDeleting(String name) { return DELETING.contains(name); }
+    public static long deletionEpoch() { return deletionEpoch; }
 
     /** Templates only: never resolves a preset path, and refuses templates used by loaded bosses. */
     public static int delete(CommandSourceStack source, String name) {
+        if (!Action.TEMPLATE_DELETE.require(source)) return 0;
         if (!ClockworkBossTemplateNames.isValid(name)) { source.sendFailure(Component.literal("Use a valid template name.")); return 0; }
         if (ClockworkBossManager.usesTemplate(name)) {
             source.sendFailure(Component.literal("Remove loaded bosses using this template before deleting it.")); return 0;
         }
         if (JOBS.incrementAndGet() > 4) { JOBS.decrementAndGet(); source.sendFailure(Component.literal("Editor is busy.")); return 0; }
         if (!DELETING.add(name)) { JOBS.decrementAndGet(); source.sendFailure(Component.literal("This template is already being deleted.")); return 0; }
+        deletionEpoch++;
         CompletableFuture.supplyAsync(() -> {
             try { return ClockworkBossTemplateStore.deleteTemplate(name); }
             catch (Exception failure) { throw new java.util.concurrent.CompletionException(failure); }

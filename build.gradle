@@ -33,6 +33,9 @@ dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    // Replaceable pure-Java decoder for bounded workshop upload validation.
+    // It stays inside the distributable jar; no companion/library install is needed.
+    include implementation('org.jcraft:jorbis:0.0.17')
 }
 
 // Capture version properties during configuration, not inside a running task.
@@ -58,6 +61,22 @@ java {
     targetCompatibility = JavaVersion.VERSION_25
     withSourcesJar()
 }
+
+// Build the offline workshop fallback from the same core setting definitions.
+// Live servers additionally export their installed addon registry. Raw default
+// resources suffice here; depending on processed resources would form a cycle.
+def generatedWorkshopSchema = layout.buildDirectory.dir('generated/workshop-schema')
+tasks.register('generateWorkshopSchema', JavaExec) {
+    dependsOn compileJava
+    classpath = sourceSets.main.output.classesDirs + sourceSets.main.compileClasspath + files('src/main/resources')
+    mainClass = 'clockwork.bosses.ClockworkBossTemplateSchema'
+    args generatedWorkshopSchema.get().file('template-schema.json').asFile.absolutePath
+    inputs.files(sourceSets.main.output.classesDirs, file('src/main/resources/default-clockwork-boss.json'))
+    outputs.file(generatedWorkshopSchema.map { it.file('template-schema.json') })
+}
+sourceSets.main.resources.srcDir(generatedWorkshopSchema)
+processResources.dependsOn generateWorkshopSchema
+tasks.named('sourcesJar') { dependsOn generateWorkshopSchema }
 
 // Native combat regressions are a separate development-only mod and disposable
 // GameTest world. Neither these classes nor their entrypoint enter the release jar.
@@ -107,6 +126,7 @@ loom {
 def licenseArchiveName = "LICENSE_${project.archives_base_name}"
 jar {
     from("LICENSE") { rename { licenseArchiveName } }
+    from('THIRD_PARTY.md')
 }
 
 // Regression checks exercise production config/media helpers without launching Minecraft.
@@ -117,6 +137,51 @@ tasks.register('auditChecks', JavaExec) {
     mainClass = 'clockwork.bosses.ClockworkBossAuditChecks'
 }
 check.dependsOn auditChecks
+tasks.register('templateTaskChecks', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'clockwork.bosses.ClockworkBossTemplateTaskChecks'
+}
+check.dependsOn templateTaskChecks
+
+// The workshop is a server module in this mod. Its file/API suites use only
+// disposable fixtures; no real server mount, hosted website or player data.
+['workshopApiChecks':'ApiChecks', 'workshopSkinChecks':'SkinChecks',
+ 'workshopTighteningChecks':'TighteningChecks', 'workshopAudioChecks':'AudioChecks',
+ 'workshopRelayChecks':'RelayChecks', 'workshopConfigReloadChecks':'ConfigReloadChecks',
+ 'workshopPresetChecks':'PresetChecks', 'workshopDraftMediaChecks':'DraftMediaChecks',
+ 'workshopItemCatalogChecks':'ItemCatalogChecks', 'workshopSoundUploadChecks':'SoundUploadChecks',
+ 'workshopMergeChecks':'WorkshopMergeChecks', 'workshopAdapterChecks':'WorkshopAdapterChecks',
+ 'workshopCoreSchemaChecks':'WorkshopCoreSchemaChecks'].each { taskName, checkClass ->
+    tasks.register(taskName, JavaExec) {
+        dependsOn testClasses
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = "clockwork.web.${checkClass}"
+    }
+    check.dependsOn taskName
+}
+tasks.register('exportRelayTestClasspath') {
+    dependsOn testClasses
+    doLast { layout.buildDirectory.file('relay-test-classpath.txt').get().asFile.text = sourceSets.test.runtimeClasspath.asPath }
+}
+
+// Export the shared editor/API definitions as plain JSON for offline/browser
+// tooling. This starts a short Java process, never Minecraft or a server.
+tasks.register('exportTemplateSchema', JavaExec) {
+    dependsOn classes
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'clockwork.bosses.ClockworkBossTemplateSchema'
+    args layout.buildDirectory.file('template-schema.json').get().asFile.absolutePath
+}
+
+// Optional independent JSON Schema validator input. The fixture addon and JSON
+// outputs live under build/ and never enter the main/client release jar.
+tasks.register('exportSchemaFixtures', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'clockwork.bosses.ClockworkBossTemplateSchemaChecks'
+    args layout.buildDirectory.dir('template-schema-fixtures').get().asFile.absolutePath
+}
 
 // These regression checks use a standalone main, not a JUnit/TestNG engine.
 // Gradle 9 otherwise treats that intentional lack of framework tests as a failure.

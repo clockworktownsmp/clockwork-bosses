@@ -1,5 +1,6 @@
 package clockwork.bosses;
 
+import clockwork.bosses.ClockworkBossPermissions.Action;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -9,7 +10,6 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
-import net.minecraft.server.permissions.Permissions;
 
 import java.util.Locale;
 
@@ -18,6 +18,7 @@ public class ClockworkBosses implements ModInitializer {
     // Fabric lists this ID during startup. Use the same namespace for generated
     // client assets and negotiated packets so both sides identify this mod alike.
     public static final String MOD_ID = "clockwork_bosses";
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(MOD_ID);
 
     private static final SuggestionProvider<CommandSourceStack> TEMPLATE_SUGGESTIONS =
             (context, builder) -> {
@@ -59,7 +60,17 @@ public class ClockworkBosses implements ModInitializer {
      */
     @Override
     public void onInitialize() {
+        // Every addon uses this startup entrypoint. Freeze definitions before
+        // templates or editor I/O workers compile settings from the catalog.
+        clockwork.bosses.api.BossActionRegistry.types();
+        for (var entry : net.fabricmc.loader.api.FabricLoader.getInstance().getEntrypointContainers(
+                "clockwork_bosses", clockwork.bosses.api.BossAddon.class)) {
+            var registry = clockwork.bosses.api.BossActionRegistry.registrar(entry.getProvider().getMetadata().getId());
+            try { entry.getEntrypoint().register(registry); } finally { registry.close(); }
+        }
+        clockwork.bosses.api.BossActionRegistry.freeze();
         initializeTemplateStore();
+        ClockworkBossTemplateTasks.register();
         ClockworkBossMediaTransfers.register();
         ClockworkBossMusic.register();
         ClockworkBossSkinNetwork.register();
@@ -91,16 +102,17 @@ public class ClockworkBosses implements ModInitializer {
         }
     }
 
-    /** Defines the administrative Brigadier command tree using native 26.3 permissions and cached suggestions. */
+    /** Defines the command tree using Fabric permission nodes and cached suggestions. */
     private static void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
-        // Template edits and encounter control are administrative operations.
-        // Use 26.3's native permission object so console and operators work normally.
+        // A grant for any child makes the root visible. Each operation checks its own
+        // node both here (completion) and in its handler (execution and GUI requests).
         var root = Commands.literal("boss")
-                .requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER));
+                .requires(ClockworkBossPermissions::canUseCommands);
 
-        // Captures are server-local and off by default. The root's native
-        // operator permission protects enabling, clearing and exporting them.
+        // Captures are server-local and off by default; their separate permission
+        // does not need to be granted to ordinary encounter hosts or template editors.
         root.then(Commands.literal("debug")
+                .requires(Action.DEBUG::allowed)
                 .executes(ctx -> ClockworkBossDiagnostics.status(ctx.getSource()))
                 .then(Commands.literal("on").executes(ctx -> ClockworkBossDiagnostics.toggle(ctx.getSource(), true)))
                 .then(Commands.literal("off").executes(ctx -> ClockworkBossDiagnostics.toggle(ctx.getSource(), false)))
@@ -110,20 +122,29 @@ public class ClockworkBosses implements ModInitializer {
 
         // The picker separates reusable presets from active templates; deletion only accepts active names.
         root.then(Commands.literal("template")
+                .requires(ClockworkBossPermissions::canUseTemplates)
+                .then(Commands.literal("schema").requires(Action.TEMPLATE_SCHEMA::allowed)
+                        .executes(ctx -> exportTemplateSchema(ctx.getSource())))
                 .then(Commands.literal("list")
+                        .requires(Action.TEMPLATE_LIST::allowed)
                         .executes(ctx -> ClockworkBossManager.listTemplates(ctx.getSource())))
                 .then(Commands.literal("edit")
+                        .requires(ClockworkBossPermissions::canEdit)
                         .executes(ctx -> ClockworkBossTemplateEditor.open(ctx.getSource(), "", false))
                         .then(Commands.argument("template", StringArgumentType.word()).suggests(TEMPLATE_SUGGESTIONS)
+                                .requires(Action.TEMPLATE_EDIT::allowed)
                                 .executes(ctx -> ClockworkBossTemplateEditor.open(ctx.getSource(), StringArgumentType.getString(ctx, "template"), false)))
-                        .then(Commands.literal("preset").then(Commands.argument("preset", StringArgumentType.word()).suggests(PRESET_SUGGESTIONS)
+                        .then(Commands.literal("preset").requires(Action.PRESET_EDIT::allowed)
+                                .then(Commands.argument("preset", StringArgumentType.word()).suggests(PRESET_SUGGESTIONS)
                                 .executes(ctx -> ClockworkBossTemplateEditor.open(ctx.getSource(), StringArgumentType.getString(ctx, "preset"), true)))))
-                .then(Commands.literal("delete").then(Commands.argument("template", StringArgumentType.word()).suggests(TEMPLATE_SUGGESTIONS)
+                .then(Commands.literal("delete").requires(Action.TEMPLATE_DELETE::allowed)
+                        .then(Commands.argument("template", StringArgumentType.word()).suggests(TEMPLATE_SUGGESTIONS)
                         .executes(ctx -> ClockworkBossTemplateEditor.delete(ctx.getSource(), StringArgumentType.getString(ctx, "template"))))));
 
         // Native literal completion offers new/preset; preset names come from the cached folder list.
         root.then(
                 Commands.literal("create")
+                        .requires(Action.CREATE::allowed)
                         .then(Commands.literal("new").then(
                                 Commands.argument("template", StringArgumentType.word())
                                         .executes(ctx -> ClockworkBossManager.createTemplate(
@@ -143,12 +164,13 @@ public class ClockworkBosses implements ModInitializer {
         // /boss spawn <template> <name>
         root.then(
                 Commands.literal("spawn")
+                        .requires(Action.SPAWN::allowed)
                         .then(
                                 Commands.argument("template", StringArgumentType.word())
                                         .suggests(TEMPLATE_SUGGESTIONS)
                                         .then(
                                                 Commands.argument("name", StringArgumentType.greedyString())
-                                                        .executes(ctx -> ClockworkBossManager.spawn(
+                                                        .executes(ctx -> ClockworkBossManager.spawnAsync(
                                                                 ctx.getSource(),
                                                                 StringArgumentType.getString(ctx, "template"),
                                                                 StringArgumentType.getString(ctx, "name")
@@ -160,6 +182,7 @@ public class ClockworkBosses implements ModInitializer {
         // /boss activate <name>
         root.then(
                 Commands.literal("activate")
+                        .requires(Action.ACTIVATE::allowed)
                         .then(
                                 Commands.argument("name", StringArgumentType.greedyString())
                                         .suggests(BOSS_NAME_SUGGESTIONS)
@@ -173,12 +196,15 @@ public class ClockworkBosses implements ModInitializer {
         // /boss remove <name> | /boss remove all
         root.then(
                 Commands.literal("remove")
+                        .requires(source -> Action.REMOVE.allowed(source) || Action.REMOVE_ALL.allowed(source))
                         .then(
                                 Commands.literal("all")
+                                        .requires(Action.REMOVE_ALL::allowed)
                                         .executes(ctx -> ClockworkBossManager.removeAll(ctx.getSource()))
                         )
                         .then(
                                 Commands.argument("name", StringArgumentType.greedyString())
+                                        .requires(Action.REMOVE::allowed)
                                         .suggests(BOSS_NAME_SUGGESTIONS)
                                         .executes(ctx -> ClockworkBossManager.remove(
                                                 ctx.getSource(),
@@ -190,6 +216,7 @@ public class ClockworkBosses implements ModInitializer {
         // /boss list
         root.then(
                 Commands.literal("list")
+                        .requires(Action.LIST::allowed)
                         .executes(ctx -> ClockworkBossManager.listActive(ctx.getSource()))
         );
 
@@ -198,12 +225,15 @@ public class ClockworkBosses implements ModInitializer {
         // /boss select cancel
         root.then(
                 Commands.literal("select")
+                        .requires(ClockworkBossPermissions::canSelect)
                         .then(
                                 Commands.literal("cancel")
+                                        .requires(ClockworkBossPermissions::canSelect)
                                         .executes(ctx -> ClockworkBossSelector.cancel(ctx.getSource()))
                         )
                         .then(
                                 Commands.literal("activation")
+                                        .requires(Action.SELECT_ACTIVATION::allowed)
                                         .then(
                                                 Commands.argument("template", StringArgumentType.word())
                                                         .suggests(TEMPLATE_SUGGESTIONS)
@@ -226,6 +256,7 @@ public class ClockworkBosses implements ModInitializer {
                         )
                         .then(
                                 Commands.literal("arena")
+                                        .requires(Action.SELECT_ARENA::allowed)
                                         .then(
                                                 Commands.argument("template", StringArgumentType.word())
                                                         .suggests(TEMPLATE_SUGGESTIONS)
@@ -241,6 +272,7 @@ public class ClockworkBosses implements ModInitializer {
         // /boss setspawn <template> stores a position on that template only.
         root.then(
                 Commands.literal("setspawn")
+                        .requires(Action.SETSPAWN::allowed)
                         .then(
                                 Commands.argument("template", StringArgumentType.word())
                                         .suggests(TEMPLATE_SUGGESTIONS)
@@ -254,9 +286,26 @@ public class ClockworkBosses implements ModInitializer {
         // /boss reload
         root.then(
                 Commands.literal("reload")
-                        .executes(ctx -> ClockworkBossManager.reload(ctx.getSource()))
+                        .requires(Action.RELOAD::allowed)
+                        .executes(ctx -> ClockworkBossManager.reloadAsync(ctx.getSource()))
         );
 
         dispatcher.register(root);
+    }
+
+    /** Authorized sources can export definitions after addon registration. The
+     * destination is fixed; this command never accepts arbitrary filesystem paths. */
+    private static int exportTemplateSchema(CommandSourceStack source) {
+        if (!Action.TEMPLATE_SCHEMA.require(source)) return 0;
+        try {
+            ClockworkBossTemplateStore.exportSchema();
+            source.sendSuccess(() -> net.minecraft.network.chat.Component.literal(
+                    "Exported config/clockwork-bosses/template-schema.json (including installed addon actions)."), false);
+            return 1;
+        } catch (Exception failure) {
+            LOGGER.warn("Could not export template schema", failure);
+            source.sendFailure(net.minecraft.network.chat.Component.literal("Could not export template schema: " + failure.getMessage()));
+            return 0;
+        }
     }
 }

@@ -1,22 +1,347 @@
-# Performance audit — Clockwork Bosses
+# Clockwork Bosses performance audit
 
-Release source/build and installed client/server: Clockwork Bosses 0.1, command root `/boss`. Earlier names, versions and commands describe historical builds.
+This describes current code and resource bounds. It is a source and ownership
+review. The recorded release has no TPS benchmark, heap profile or long-running
+load test. [Preflight](PREFLIGHT.md) records the checks; [modpack testing](MODPACK_TESTING.md)
+records pack isolation and warnings.
 
-## Version 0.1 tightening — 2026-10-10
+## Moving melee wind-up — 0.2.0, 2026-10-12
 
-Decimal text, precision and exponent guards run before numeric expansion or
-percentage formatting. Imported extreme percentages use compact representation;
-normal display remains plain. Exact comparisons avoid rounded-limit acceptance.
-A save serializes its patch once; both sides use the same byte limit. Empty
-entry lists return before native reward table/context construction.
+The existing per-boss AI callback still owns one pending UUID, immutable settings
+and a world-time deadline. Movement keeps that same record; no new listener,
+queue, timer, target registry or navigation controller was added. Target/phase
+validity is checked throughout the wait. Native reach and visibility checks now
+run at impact instead of on every wind-up callback. An invalid impact clears
+the record, so returning cannot revive it. Phase/action/unload cleanup is unchanged.
 
-Reviewed existing bounded worker/cache ownership, teardown on disconnect,
-resource reload and shutdown, encounter unload cleanup, and native reward gates.
-No additional watcher, executor, packet type or per-frame registry scan was added.
-No heap profiling, network latency simulation or production performance benchmark
-was performed. Release checks are in `../work/release01-results.json`. Both
-installed jars match the verified build; RC8 backups and paths are recorded in
-`../work/release01-deployment.json`. No installed configurations were edited.
+The new movement regression failed before the fix and passes afterward. All 40
+native tests pass without and with Lithium, plus the offline/full packaging
+checks recorded in [Preflight](PREFLIGHT.md). This removes repeated reach/sight
+work from the waiting path; it is not a measured TPS or heap improvement.
+
+The client tendril tint also removes body/face coverage from its shared base
+atlas at mask creation. UV checks happen only on bounded cache misses (32 masks,
+1024x1024 dimension / 4 MiB source limits); no per-frame pixel processing was
+added. Masks still belong to the texture manager and existing eviction/reload
+cleanup. Native pixel/model checks pass with tested EMF/ETF versions; the user's
+whole-skin flash requires a rendered encounter confirmation.
+
+## Merged workshop and file ownership — 2026-10-12
+
+The optional workshop has no tick callback or inbound HTTP listener. Disabled
+access resolves/migrates settings on one config worker and skips identity,
+registry capture and network/upload workers. Its idle config thread can time
+out. Enabled item capture reads at most 64 items per native task, with a soft
+2 ms budget and 30-second total deadline; sorting/hashing stays off-thread. A
+third-party name getter cannot be preempted: this is not a proven per-tick cap.
+Permission requests run on Minecraft's thread; file/network workers wait at
+most two seconds and cancel their native future on failure.
+
+Core create/setspawn/spawn/reload/selection and voice-folder reads now use one
+file worker plus 32 waiting slots. Command return values report admission; later
+chat reports the actual result. Native completion rechecks permission, identity,
+deletion and loot registries. Restoration temporarily pauses AI and releases
+that pause on completion, unload or shutdown. Even reader Errors settle their
+future before propagating. The existing editor's four jobs and one preset copy
+retain separate bounded Minecraft I/O-pool ownership. Synchronous public
+spawn/reload/store helpers remain compatible; live commands use async paths.
+
+Native editor transactions and web publication share a worker-only writer gate
+with revision rechecks. Native completions never take it, avoiding a lock cycle
+while publication asks native permission. One pure filesystem guard checks both
+modules, including Windows junctions. The offline schema fallback is generated
+from core definitions; runtime export includes installed addons. No filesystem
+poller, combat timer or per-tick workshop allocation was added.
+
+Relay limits: four file workers + queue 12, two network workers + queue 128,
+16 operations, two credited 32 KiB upload streams and one decoder. Config admits
+one reload. Retry retains one timer and backs off 1/2/4/8/16/32/60 seconds plus
+at most one second of jitter. Connect/ready limits are 10/15 seconds; heartbeat
+is 30 seconds, stale cutoff 85. Canceled handshakes, readiness tasks, streams
+and queued operations are removed. Existing storage/media/backup quotas remain.
+Logout uses a retained owner reference even while transport readiness is absent.
+
+Verified: disabled preparation count is zero; queue overflow rejects; config
+self-close takes less than 500 ms instead of waiting two seconds for itself;
+reader failures settle; reconnect does not replay writes; outage logout revokes;
+native commands/fights progress with unreachable relay; local transport shutdown
+leaves no relay workers. These are bounded regressions and ownership checks,
+not TPS/heap benchmarks. Rendered mixed-client latency, live TPS and long-running
+heap behavior remain unmeasured. See [Preflight](PREFLIGHT.md) for test evidence.
+
+## Automatic spatial custom-sound distance — 2026-10-11
+
+Distance resolves only when an event, custom roar or voice line triggers, using
+the encounter's compiled arena geometry. Native AABBs already include the maximum
+block, so the diagonal needs no config reparse, player scan, chunk load, watcher,
+deadline map or retained resource. Auto float conversion rounds outward only
+when required to retain the computed boundary. Music is unchanged.
+
+Playback packets and their native recipient queries are bounded to 1–512 blocks.
+Larger manual/automatic ranges can include more loaded player sections and more
+listeners than the prior 128-block cap; they are not free. Existing spatial AABB
+queries, exact squared-distance filtering, capability checks, shared payloads,
+media caches, transfer windows/expiry and per-player budgets remain in use.
+No transfer size, decode limit, channel limit or protocol layout was increased.
+The same cached sound path owns audio cleanup; no additional allocation is kept
+per tick or per encounter. Old clients can retain their 128-block attenuation cap.
+
+Offline compilation and bounded geometry/settings/packet assertions passed.
+No TPS, heap, network latency, actual client audio or modpack benchmark was run.
+
+## Pupil settings — 2026-10-11, source only
+
+`ClockworkBossPupils` is an immutable bounded value: four eye-local offsets,
+independent dimensions and visibility fit in one metadata integer. Configuration
+and the existing GUI input callbacks update it; vanilla tracking sends changes.
+The optional-client layout includes the appended field. No watcher, recurring job,
+executor, media transfer or additional handshake was added.
+
+Pupil identity extends the existing 32-entry emissive mask key and texture ID.
+Non-face masks remain shared. Clipped rectangles are measured on cache misses,
+then existing eviction/resource-reload/disconnect cleanup releases the textures.
+The website draws on its existing input/resize path without adding an animation
+loop. Compilation/schema export and JavaScript syntax checks passed; runtime
+performance and in-game verification remain pending.
+
+## Compact editor presentation — 2026-10-11, source only
+
+The shared client theme holds only immutable color/size constants. Field
+measurement and optional two-column placement run on existing rebuild events;
+rendering does not measure the whole form or search the section catalog. Measured
+rows also determine scroll bounds, and only visible controls own widgets. Layout
+records are temporary to a rebuild. Help remains available without permanently
+allocating screen space. Compact item grids retain native 16-pixel icons.
+
+There is no new tick callback, job, thread, packet, texture, permission cache or
+server work. Existing screen/session and preview cleanup owns all retained state.
+Common/client compilation passed; no runtime performance or GUI-scale measurement
+was performed. This presentation pass is now packaged and installed as
+`0.2.beta.1`; installation hash checks do not verify runtime behavior.
+
+## Fabric v1 permissions — 2026-10-11, source only
+
+Sixteen immutable typed nodes and two fixed definition arrays hold no players,
+grants or server state. The permission provider owns caching and contexts.
+Visibility checks short-circuit; execution/editor/selector checks run only on
+their existing interaction callbacks. No watcher, recurring job, thread,
+database connection or additional per-player registry is created. Client selector
+previews still bypass server authorization queries.
+
+Editor jobs retain existing global/session limits. Permission checks stay on the
+server thread, before I/O scheduling and before document/preview delivery. Busy
+state is cleared before a denied completion; queued previews check relevance
+before transfer start. Authorized in-flight writes/transfers may finish. Existing
+session identity, leave/shutdown cleanup and own-session cancellation own resource
+release. Common/client compilation succeeded; no runtime provider or performance
+measurement was performed. See [PERMISSIONS.md](PERMISSIONS.md).
+
+## Potion death boundary — 2026-10-11, source only
+
+One native committed-death hook releases this player's temporary potion grants
+before inventory capture. It checks the bounded native inventory/cursor, restores
+the unchanged live offhand, and drops member references once. Later death/copy
+cleanup has no remaining potion member to release. Ordinary players receive no
+inventory refresh when no marked bottle changed. Totem survival and canceled
+death skip this boundary. Other participants' overlapping grants stay intact.
+The existing use callback clears an older orphan on attempted use; it adds no
+watcher, scheduled task, grave/container scan, registry or optional dependency.
+Non-potion slots are rejected before inspecting custom marker data.
+
+Common/client compilation, 5,013 offline checks and 33 native tests passed with
+and without the supplied server pack, including actual grave recovery. The
+early pack runs stalled at shutdown when the native respawn fixture fell back
+from the occupied grave block to remote world spawn. A separate checkpoint in
+the loaded test area corrected the fixture; the final supplied-pack and narrower
+Graves/Lithium/Polymer runs passed all 33 tests and shut down normally. No
+gameplay chunk-ticket workaround was added. No heap, load or real-client latency
+measurements were performed for this change.
+
+## Removal cleanup and shared form rules — 2026-10-11, source only
+
+Explicit boss removal performs one bounded inventory/cursor pass for online
+players without potion membership. It does not scan world containers or add a
+timer. Members of other encounters keep their existing bottle. A cleaned member
+receives a native full inventory refresh; the orphan pass sends nothing to players
+whose inventory is unaffected. Saved personal offhand contents still move from
+the live recorded slot rather than being recreated from a snapshot.
+Action/geometry visibility is one immutable rule shared by the GUI/schema;
+hiding controls does not allocate encounter state or mutate saved values.
+Common/client compilation, 5,013 offline checks, independent schema validation
+and all 29 isolated native tests passed. No heap profile, load benchmark or real
+client/high-latency network test was performed for this pass.
+
+## Template tooling foundation — 2026-10-11, source only
+
+Schema generation occurs only in the explicit build task/operator command. It
+reuses bounded settings/descriptors and private immutable form prototypes; it
+holds no entities, players, worlds or connections and adds no watcher/timer.
+The operator export uses the same 512 KiB atomic config writer and fixed path.
+The standalone parser bounds streamed UTF-8 input and nesting, rejects duplicate
+members, and retains unknown numbers without decimal expansion. Both writers
+copy document data and release all temporary state after the call. Descriptor
+help is exported as text data, not executable code.
+Common/client compilation and 4,947 offline assertions passed, plus independent
+schema validation. No runtime export timing, browser performance or heap/load
+measurements were performed. See [template tooling](TEMPLATE_SCHEMA.md).
+
+## Pending optional-client source — 2026-10-11
+
+One immutable array of twelve actual Warden accessor IDs defines the wire adapter.
+It retains no world, entity, player or connection references. Pairing uses the native
+method's recipient; dirty updates use Minecraft 26.3's existing filtered tracking
+broadcast. Unchanged metadata reuses the original list/packet. Changed metadata
+allocates one small fallback list and at most one packet per update shared by all
+recipients without the mod; visual-only updates send them no empty packet. A changed
+update can traverse the existing Warden tracking set twice, with a negotiated-channel
+membership check per recipient. Native metadata limits bound the field list.
+
+No presence registry, retry queue, handshake timer, thread or watcher is added.
+Modded recipients keep original metadata; unrelated entities/attribute packets
+retain their original calls. Existing media channel guards skip unsupported clients.
+Java 25 / Minecraft 26.3 common/client compilation passed; mixed-client runtime,
+modpack compatibility and actual network/performance measurements remain pending.
+
+## Pending API source review
+
+The 2026-10-10 safety pass adds one primitive server-thread ID per runtime and
+one stop-depth counter per encounter. Replacement startup waits for outgoing
+cleanup; native behavior/combat stays blocked during restoration. No extra
+watcher, timer, worker or global ownership map was added. Temporary entities
+reject portal work/cross-dimension replacement, preventing escape from cleanup.
+Snapshot failure is inside the protected cleanup scope. Fabric listeners remain
+process-wide: addons must register once and avoid capturing live encounter
+objects. Slow callbacks can still stall the server; this pass includes no heap
+profile or measured load test. Common/client compilation succeeded. See
+[API safety review](API_SECURITY_REVIEW.md) for findings and remaining limits.
+
+Experimental [API revision 1](API.md) attaches one action runtime to each loaded
+encounter and uses the existing boss AI callback. No additional watcher,
+executor or global entity queue is introduced. Settings compile on load/reload;
+editor descriptors are bounded and startup-frozen. Scope cleanup retains at
+most 64 resources per execution, releases references on interruption, and
+explicitly owned entities cannot be saved as chunk entities or passengers.
+Core burrow saves a bounded restoration journal rather than an action object.
+Event snapshots contain UUIDs, and listener failure logging is limited to once
+per minute. This is source/compilation evidence, not a runtime leak profile or
+TPS result; the API-specific preflight checks remain pending.
+
+## Work that repeats
+
+| Work | Cadence and purpose |
+| --- | --- |
+| Empty dispatcher | Native end-server-tick, immediate idle guard; no encounter scan while empty |
+| Dormant activation/aura and active arena membership | Shared 10-tick scan; moving players/redstone need current results |
+| Active phase/emergence/attacks | Existing marked Warden AI step and native game time |
+| Active Darkness query | Every 10 ticks or shorter refresh interval; per-player deadlines limit application |
+| DIG cooldown | Renew when its expiring native memory is absent |
+| Selector preview | Native end-client-tick, immediate held-tool guard |
+| Glow/flash | Existing render layer; local age, no server flash countdown |
+| Event/voice cleanup | One pause-aware timeout plus native audio lifecycle |
+| Music refills/fades | Native sound-engine tick; one stream, sixteen requests maximum |
+
+Settings/regions compile on load/reload. Attacks and autocomplete use cached
+values. Queries use loaded sections and do not force chunks. Total work still
+grows with the administrator's number of bosses and players.
+
+## Resource bounds
+
+| Resource | Bound |
+| --- | --- |
+| Phases / subphases / roars | 1-16 phases; 0-16 children and 0-16 roars per phase |
+| Arena box / radius | 256 blocks per axis / 1-256 blocks |
+| Darkness | 0-256 blocks, 1-12000 ticks, amplifier 0-4 |
+| Beam / phase particles | 64 samples / 128 particles |
+| Saved first-heal ledger | 4096 UUIDs per boss |
+| Server media workers | Four running / 64 pending identities per cache |
+| Event/skin snapshots | Sixteen positive / sixteen failed per cache |
+| Per-player transport | One assembly; 16 KiB chunks, 64 KiB window, 64 waiting identities / 8 MiB |
+| Skin textures | 64 entries, eight outstanding jobs across reconnects |
+| Custom PNG | Exactly 128x128, at most 512 KiB |
+| Server / client compressed PNG | Sixteen server files; client 64 files or 32 MiB |
+| Glow masks | 32 owned textures / 32 failed-source entries |
+| Event/voice compressed cache | Sixteen files; each at most 1 MiB minus 1 KiB |
+| Decoded clip cache | Sixteen clips or 32 MiB; one clip at most 8 MiB / 30 seconds |
+| Event/voice jobs | Four decoders, sixteen waiting callbacks, eight active/pending-cleanup channels |
+| Voice discovery | 4096 directory entries / 64 candidate basenames |
+| OGG guards | 4096 event/voice pages; 128 KiB comment/setup headers; 1,000,000 codebook and mode-residue cells each |
+| Music file | 8 MiB minus 1 KiB; ten minutes |
+| Server music snapshots | Four files, roughly 64 MiB compressed plus encoded |
+| Client music | Four compressed files under 32 MiB; sixteen requests, two initial jobs, one stream |
+| Editor | 64 sessions, one pending job each, 30-minute lazy expiry; four global I/O jobs |
+| Save patch / response | 24,000 UTF-8 bytes / 512 fields; 65,536 response JSON characters |
+| Template read/write | 512 KiB, depth 32 |
+| Preset copy | One pending native I/O job, 96 media files / 32 MiB |
+| Entry loot | 32 pools, 64 items each: 2048 configured items maximum |
+| Diagnostics | 2048 events / 128 active attack IDs; config fingerprints up to 2 MiB each |
+| Edited numbers | 128 characters, 64 significant digits, decimal scale -64 to 64 |
+
+Current music and loop buffers can retain compressed bytes beyond the four-file
+cache. A complete PCM track is not retained. Per-loop PCM output caps at ten
+minutes plus one second.
+
+Queue saturation can suppress media. Waiting audio expires after eight seconds
+before transfer starts; first-use audio can still arrive late. A stalled peer
+can retain an in-flight bounded reservation until receipt/disconnect.
+
+## Work reviewed for 0.1
+
+Numeric guards precede expansion/formatting, and exact decimal comparisons
+enforce field bounds. Imported extremes display compactly. Save serializes once
+and uses the same client/server patch bound. Empty rewards skip table/context work.
+
+Nonempty entry tables build only at committed payout. Picker stacks/names/categories
+cache per opening; filtering runs on input and only visible icons own widgets.
+The detached preview renders only on its page, refreshes files on explicit
+request, and shares bounded mask/texture caches.
+
+Target rotation runs at native assignment/completion boundaries. Holds/counts
+use one UUID, timestamp and saturating count per encounter. Cheap arena/range
+tests precede raycasts. Suppressed titles are not queued.
+
+Support shares arena queries. Native effect/attribute events reconcile grants
+and equipment changes. Offhand restoration checks the recorded slot.
+Lifecycle bottle cleanup does not scan world containers.
+
+## Cleanup and practical limits
+
+Exit/death/unload/disconnect/respawn/server-stop paths release the relevant
+encounters, bars, grants, selections, sessions and queues. First-heal ledgers
+and potion cooldowns are deliberate saved gameplay state.
+
+Generation/session checks prevent old callbacks publishing into replacement
+sessions. Media completion runs outside cache locks, including rejection.
+Temporary music capacity retries through existing membership scans; invalid
+files wait for reload.
+
+Textures release on the client thread. Native channel removal precedes buffer
+deletion on the audio executor. Upload memory, decoders and image streams have
+explicit cleanup. Resource/device reload drains owned work before teardown.
+
+Stale/invalid saves preserve the prior file. One rolling GUI backup is kept.
+Deleted templates remain recoverable whole-folder archives and are not pruned.
+Staged writes prefer atomic replacement with rename fallback; remote filesystem
+transaction behavior is outside that guarantee.
+
+The 2026-10-10 release recorded 4384 audit assertions, 1038 native GUI assertions
+and 28/28 server tests with/without the supplied pack, plus production-jar local
+startup/spawn/activate/save/remove/shutdown. These are correctness/layout/startup
+results. They do not measure TPS, allocations, long-duration memory, real
+multiplayer latency or full-pack client play. Source review cannot prove all
+runtime leaks or third-party interactions are covered.
+
+## Earlier build records
+
+These notes preserve the original build and review evidence. Version, installation,
+publication and pending-test statements describe when each note was written.
+Use the current sections above for setup and behavior. A later pass does not
+turn an earlier compile-only check into a playtest.
+
+Local `../work/` and `../outputs/` paths refer to the original development
+workspace. They are outside version control and may be absent in a clone.
+
+<details>
+<summary>Expand the dated notes and technical evidence</summary>
 
 ## Beta RC 8 entry-editor costs — 2026-10-10
 
@@ -181,7 +506,7 @@ GUI dragging retains only a root/key and position, not widgets or entities. Mous
 
 Subphase policies/attributes are compiled once on load/reload, bounded to 16 health phases with at most 16 children each. Runtime uses a child index, completed-attack count and generation. Completion callbacks advance children; only the existing Warden AI callback resolves pending melee and requests native roar. No new entity sweep, scheduler, thread or directory scan is added. Main-phase ownership keeps health/scale/aura/glow/events separate from behavior sequences.
 
-Pending melee retains one UUID, deadline, generation and immutable policy, never a target entity. Native loaded-entity lookup does not load chunks. Target replacement, disconnect, death, invalid range/visibility, phase change, reload and boss cleanup discard it. The eventual hit goes through native `doHurtTarget`; a vetoed hit releases its visual in `finally`. Melee starts cancel unfinished beams, avoiding two pending attacks sharing the callback. Timelines contain bounded primitives and update metadata at start/impact/cancel, not every tick; clients parse only on changes and sample native keyframes from shared world time.
+Pending melee retains one UUID, deadline, generation and immutable policy, never a target entity. Native loaded-entity lookup does not load chunks. Target replacement, disconnect, death, phase change, reload and boss cleanup discard it immediately. Movement retains its timer; native range/visibility at impact determine whether the hit can land. A missed impact clears the record. The eventual hit goes through native `doHurtTarget`; a vetoed hit releases its visual in `finally`. Melee starts cancel unfinished beams, avoiding two pending attacks sharing the callback. Timelines contain bounded primitives and update metadata at start/impact/cancel, not every tick; clients parse only on changes and sample native keyframes from shared world time.
 
 Roar reuses Minecraft's native activity/memory/pose/duration. Its mixin owns primitive tokens only; token checks stop interrupted roars from advancing replacement sequences. Ordinary Wardens retain native behavior. Attack recoil finishes before a configured roar starts. Native stop's target assignment would install a new 200-tick Sonic Boom delay; the hook restores the naturally elapsed prior cooldown for configured roars only. Custom roar files are warmed on load/reload through the existing bounded cache, with normal basename/OGG validation and transfer limits.
 
@@ -511,3 +836,5 @@ Independent face controls add one synchronized integer for brows and reuse the e
 ## Pending targeting safeguards
 
 Target holds/counts use one UUID, timestamp and saturating integer per loaded encounter; state disposal releases them. The existing completion/assignment hooks check deadlines with no additional watcher, scheduled task, player registry or tick scan. Automatic arena follow range uses cached dimensions only when attributes are applied. Candidate queries remain native loaded-section queries bounded at 256 blocks; ranged candidates reuse the configured collider raycast only when required. Personal/audience throttle stamps remain one map entry per connected recipient with existing disconnect/server-stop cleanup. No runtime measurements or tests were performed; common/client compilation succeeded.
+
+</details>

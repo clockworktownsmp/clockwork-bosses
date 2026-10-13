@@ -11,7 +11,7 @@ import net.minecraft.resources.Identifier;
  */
 public record CustomWardenSkinPayload(String templateName, String fileName, byte[] pngBytes) implements CustomPacketPayload {
     private static final java.util.regex.Pattern FILE_NAME =
-            java.util.regex.Pattern.compile("[a-z0-9][a-z0-9._-]{0,63}\\.png");
+            java.util.regex.Pattern.compile(ClockworkBossTemplateText.PNG_FILE);
     public static final int MAX_PNG_BYTES = 512 * 1024;
     public static final Type<CustomWardenSkinPayload> TYPE = new Type<>(
             Identifier.fromNamespaceAndPath(ClockworkBosses.MOD_ID, "custom_warden_skin_v2"));

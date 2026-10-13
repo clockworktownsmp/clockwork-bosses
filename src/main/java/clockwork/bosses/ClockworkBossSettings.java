@@ -55,7 +55,8 @@ public record ClockworkBossSettings(ClockworkBossPhase.Thresholds thresholds,
                         number(voice, empty, "chance", 0.25, 0, 1),
                         (float) number(voice, empty, "volume", 1, 0, 4),
                         (float) number(voice, empty, "pitch", 1, 0.5, 2),
-                        (float) number(voice, empty, "range", 32, 1, 128)),
+                        (float) number(voice, empty, "range", ClockworkBossSoundDistance.LEGACY_FALLBACK,
+                                ClockworkBossSoundDistance.AUTOMATIC, ClockworkBossSoundDistance.MAX_RANGE)),
                 // Absent/null retains existing templates' health-selected aura.
                 // A present section is independent; its missing fields inherit
                 // phase 1 once here, never through JSON work in the watcher.

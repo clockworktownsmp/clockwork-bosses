@@ -7,7 +7,8 @@
   "entrypoints": {
     "fabric-gametest": [
       "clockwork.bosses.ClockworkBossCombatGameTests",
-      "clockwork.bosses.ClockworkBossLootGameTests"
+      "clockwork.bosses.ClockworkBossLootGameTests",
+      "clockwork.web.WorkshopGameTests"
     ]
   },
   "depends": {

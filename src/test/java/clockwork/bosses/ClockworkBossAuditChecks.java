@@ -19,6 +19,10 @@ public final class ClockworkBossAuditChecks {
     private static int assertions;
 
     public static void main(String[] args) throws Exception {
+        if (args.length == 1 && args[0].equals("--sound-distance-only")) {
+            System.out.println("Clockwork Boss sound-distance checks passed: " + ClockworkBossSoundDistanceChecks.run() + " assertions.");
+            return;
+        }
         checkTemplates();
         checkLootSchema();
         checkLootEntries();
@@ -27,6 +31,8 @@ public final class ClockworkBossAuditChecks {
         checkHealthAndChargeSnapshots();
         checkTargetingAndVisualTiming();
         checkMediaBoundaries();
+        assertions += ClockworkBossSoundDistanceChecks.run();
+        assertions += ClockworkBossTemplateSchemaChecks.run();
         if (args.length > 0) Files.writeString(Path.of(args[0]),
                 ClockworkBossTemplateDocument.write(ClockworkBossTemplateDocument.defaults()));
         System.out.println("Clockwork Boss audit checks passed: " + assertions + " assertions.");
@@ -107,7 +113,10 @@ public final class ClockworkBossAuditChecks {
         var empty = ClockworkBossTemplateDocument.defaults(); empty.getAsJsonObject("loot").addProperty("enabled", true);
         check(ClockworkBossLoot.read(empty).entries().isEmpty(), "explicit empty entry table is valid");
         var saved = ClockworkBossTemplateDocument.read(new StringReader(ClockworkBossTemplateDocument.write(candidate)));
-        check(saved.equals(candidate), "entry comments roundtrip without changing data");
+        // The editable draft includes a trusted action catalog for the GUI;
+        // durable template data intentionally excludes that transport metadata.
+        check(saved.equals(ClockworkBossTemplateFormat.forSave(candidate)), "entry comments roundtrip without changing durable data");
+        check(!saved.has(ClockworkBossActionEditor.CATALOG), "GUI action catalog is not persisted");
     }
 
     /** Pure config/editor checks need no live server registry or loot-table roll. */
@@ -353,7 +362,7 @@ public final class ClockworkBossAuditChecks {
         byte[] returned = payload.oggBytes();
         returned[0] = 0;
         check(payload.oggBytes()[0] == 'O', "payload accessor is defensive");
-        check(payload.volume() == 4 && payload.pitch() == 0.5 && payload.range() == 128, "playback clamps");
+        check(payload.volume() == 4 && payload.pitch() == 0.5 && payload.range() == 512, "playback clamps");
         rejects(() -> new ClockworkBossSoundPayload("test.ogg", revision,
                 new byte[ClockworkBossSoundPayload.MAX_OGG_BYTES + 1], 0, 0, 0, 1, 1, 32), "oversized OGG rejected");
         rejects(() -> new ClockworkBossSoundPayload("test.ogg", revision, new byte[0],

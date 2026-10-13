@@ -13,6 +13,7 @@ import net.minecraft.client.renderer.entity.state.WardenRenderState;
 /** Actual transformed 26.3 client/model checks; this separate development mod never enters the universal jar. */
 public final class ClockworkBossClientChecks implements ClientModInitializer {
     private static int comparisons;
+    private static int maskChecks;
     private static boolean started, done;
     private static long deadline;
     @Override public void onInitializeClient() {
@@ -30,8 +31,8 @@ public final class ClockworkBossClientChecks implements ClientModInitializer {
             done = true;
             try {
                 check(client);
-                System.out.println("CLOCKWORK_CLIENT_CHECK_PASS: " + comparisons + " native model component comparisons");
-                java.nio.file.Files.writeString(java.nio.file.Path.of("client-check-result.txt"), "PASS:" + comparisons);
+                System.out.println("CLOCKWORK_CLIENT_CHECK_PASS: " + comparisons + " native model component comparisons, " + maskChecks + " emissive pixels");
+                java.nio.file.Files.writeString(java.nio.file.Path.of("client-check-result.txt"), "PASS:" + comparisons + ":masks=" + maskChecks);
             } catch (Throwable failure) {
                 failure.printStackTrace();
                 System.err.println("CLOCKWORK_CLIENT_CHECK_FAIL");
@@ -43,6 +44,7 @@ public final class ClockworkBossClientChecks implements ClientModInitializer {
     }
 
     static void check(Minecraft client) {
+        checkEmissiveMasks(client);
         for (int duration : new int[]{1, 2, 34, 68, 200}) {
             for (float fraction : new float[]{0, .25F, .5F, 1}) {
                 long whole = (long) (duration * fraction);
@@ -58,6 +60,38 @@ public final class ClockworkBossClientChecks implements ClientModInitializer {
         compare(client, -1, true, false);
         compare(client, -1, true, true); // A separate native melee animation must remain unchanged.
         compare(client, 850, false, false);
+    }
+
+    /** The tendril layer shares vanilla's complete base atlas. Its tint mask
+     * must exclude body UVs even if another renderer supplies a full model. */
+    private static void checkEmissiveMasks(Minecraft client) {
+        for (String name : new String[]{"warden.png", "warden_heart.png", "warden_pulsating_spots_1.png", "warden_pulsating_spots_2.png"}) {
+            var sourceId = net.minecraft.resources.Identifier.withDefaultNamespace("textures/entity/warden/" + name);
+            var maskId = clockwork.bosses.client.WardenEmissiveMaskTexture.getTexture(sourceId);
+            if (maskId == null || !(client.getTextureManager().getTexture(maskId) instanceof net.minecraft.client.renderer.texture.DynamicTexture texture))
+                throw new AssertionError("Missing native emissive mask: " + name);
+            var mask = texture.getPixels();
+            try (var input = client.getResourceManager().open(sourceId);
+                 var source = com.mojang.blaze3d.platform.NativeImage.read(input)) {
+                if (mask == null || mask.getWidth() != source.getWidth() || mask.getHeight() != source.getHeight())
+                    throw new AssertionError("Emissive atlas dimensions: " + name);
+                int retained = 0;
+                for (int y = 0; y < mask.getHeight(); y++) for (int x = 0; x < mask.getWidth(); x++) {
+                    // Native 26.3 zero-depth tendril boxes: front/back UVs at
+                    // (58,0)..(90,16) and (52,32)..(84,48) in a 128x128 atlas.
+                    int u = x * 128 / mask.getWidth(), v = y * 128 / mask.getHeight();
+                    boolean allowed = !name.equals("warden.png") || u >= 58 && u < 90 && v < 16
+                            || u >= 52 && u < 84 && v >= 32 && v < 48;
+                    int alpha = allowed ? source.getPixel(x, y) >>> 24 : 0;
+                    int actual = mask.getPixel(x, y);
+                    maskChecks++;
+                    if (actual >>> 24 != alpha || alpha != 0 && (actual & 0xFFFFFF) != 0xFFFFFF)
+                        throw new AssertionError("Emissive coverage escaped its glow layer: " + name + " at " + x + "," + y);
+                    if (alpha != 0) retained++;
+                }
+                if (retained == 0) throw new AssertionError("Native glow was erased: " + name);
+            } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
+        }
     }
 
     private static void compare(Minecraft client, long millis, boolean marked, boolean melee) {

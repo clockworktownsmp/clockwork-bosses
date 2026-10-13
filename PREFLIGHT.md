@@ -1,30 +1,547 @@
-# Preflight — Clockwork Bosses
+# Clockwork Bosses preflight
 
-Release source/build and installed client/server: **0.1**. Older results apply only to their named builds.
+Use this checklist before putting the current build into an arena your players will use.
+Current checks appear first; dated sections below retain earlier release evidence.
 
-## Version 0.1 release checks — 2026-10-10
+## 0.2.0 release and moving melee wind-up — 2026-10-12
 
-Numeric input is limited to 128 characters, 64 significant digits and decimal
-scale/exponents within -64 to 64. Normal decimal/scientific notation stays exact;
-this guard applies to edited numeric values and reward definitions. Imported
-malformed percentages display compactly and must validate before edits save.
-Exact range comparisons reject values just outside limits even when double
-rounding would previously have accepted them. Added audit and native GUI cases.
+Reproduced the reported cancellation before the fix: the new native movement
+regression failed on its first tick while the previous 37 tests passed. Pending
+melee now retains its target/deadline while either combatant moves. Native
+navigation remains active; reach and visibility are tested at impact. Invalid
+targets, owning-action interruption, phase changes, reload and unload still
+release pending work. An out-of-reach/obstructed impact does no damage and cannot
+land later. No new AI, scheduler, config field or public API change was added.
 
-Passed: 4384 audit assertions, 1038 native GUI assertions, 28/28 server tests
-without the pack and 28/28 with the supplied server pack. The isolated packaged
-production server reached readiness, spawned/activated/saved/removed a boss and
-exited normally (code 0). GUI checks included Sodium, Lithium, ETF and EMF.
-Evidence and verified artifact hashes: `../work/release01-results.json`.
-Verified jar metadata identifies version 0.1, includes seven presets and excludes
-all development fixtures. Artifact: `../outputs/clockwork_bosses-0.1.jar`, 914046
-bytes; SHA-256 `A62B75E8DD3F28E5286010A6E6350F3FED0CE25144BC37892ED283CF42DDA3B6`.
-Real multiplayer latency, full-pack client play and heap profiling remain untested.
-Installed 0.1 in Test Client and the stopped remote test server after backing
-up both RC8 jars. Independently verified both installed hashes and exactly one
-boss jar per mods folder. Record: `../work/release01-deployment.json`. Existing
-templates, media and worlds were preserved; neither application was started.
-Nothing was committed, pushed or uploaded to GitHub.
+Verified against the release source/jar:
+
+- Java 25 / Gradle 9.7.0 / Loom 1.18.2 offline full build: common/client
+  compilation, 5,216 core audit assertions, file-worker checks and all thirteen
+  workshop suites pass.
+- All 40 required native Minecraft 26.3 GameTests pass, both without Lithium and
+  with the supplied Lithium 0.26.2+mc26.3. New tests cover both actors moving,
+  the original impact deadline, no duplicate hit, escape at impact, a wall at
+  impact and target clearing. Existing phase/reload/unload/combat checks remain.
+- Independent JSON Schema checks: both exports valid; 14 accepted and 11 rejected
+  fixtures. Portable template contract export passes 642 assertions.
+- The exact packaged jar boots in disposable loopback servers with workshop
+  disabled and enabled against an unreachable TLS relay. Create/spawn/activate,
+  native workshop aliases, reload/remove and clean shutdown pass. Legacy fixture
+  settings/data remain byte-identical. Loader rejects the old companion before
+  initialization.
+- Fabric metadata is `0.2.0`; the rebuilt example addon 0.1.3 pins that version.
+  The release package excludes development tests, private configs/worlds and
+  website assets; checksum/package receipts are kept outside source.
+- The client mask regression failed before correction on an opaque body pixel
+  in the tendril mask. That mask now retains only native 26.3 tendril front/back
+  UVs; other glow textures keep their alpha. After correction, 65,536 emissive
+  pixel checks and 2,700 native model comparisons pass with Sodium/Lithium and
+  both EMF 3.3.8 / ETF 7.2.4 and current EMF 3.3.11 / ETF 7.2.5. These checks
+  inspect loaded masks/models, not a multiplayer screenshot. A replacement model
+  exposing the old full-atlas mask is a plausible cause of the reported whole-
+  skin flash, not a confirmed diagnosis of the user's exact rendered frame.
+
+Native movement tests use scripted entity positions; they do not substitute for
+a rendered multiplayer chase or latency test. Follow the added moving-wind-up
+steps in [Playtest checklist](PLAYTEST_CHECKLIST.md). No live server/client jar
+was replaced and no real server was restarted for these checks. Actual mixed
+client rendering, full live-pack fights, TPS and long-running heap behavior
+remain manual. Earlier beta relay/frontend integration evidence is separate.
+
+## 0.2.0-beta.4 merged workshop — 2026-10-12
+
+Merged latest core and companion 0.3.7, including uploads, into one universal
+jar. Workshop is optional and dedicated-server only; website remains separate.
+Main commands use `/boss workshop`, with temporary `/bossworkshop` aliases and
+unchanged native owner authority. Settings migrate byte for byte on a worker.
+Identity, drafts, media, backups and journals retain their storage paths. Loader
+rejects the old companion before either initializer. The public experimental
+action API and client-optional metadata adapter remain available.
+
+Recorded merge checks:
+
+- Offline Java 25 / Gradle 9.7.0 / Loom 1.18.2 full build and common/client/test
+  compilation: 5,216 core audit assertions, file-worker checks and thirteen
+  workshop suites. Includes legacy/default/invalid/missing/concurrent migration,
+  unchanged persisted bytes, native/web writer conflicts, outage logout,
+  reader Error cleanup and actual Windows key-path junction rejection.
+- 37 required native Minecraft 26.3 GameTests: combat/loot/support plus command
+  aliases/owner boundaries, fallback metadata codec, native item batching and
+  saved-boss async restoration.
+- Independent JSON Schema: both exports valid; 14 accepted / 11 rejected fixtures.
+- 33 existing Cloudflare security/streaming tests and merged Java client against
+  real local workerd: credited uploads over 512 KiB, exact draft/JSON/media
+  publication, overwrite validation, CSRF/cookie isolation, revoked access,
+  reconnect without mutation replay, logout and no surviving relay threads.
+- Packaged production jar in disposable loopback worlds: workshop disabled,
+  enabled with unreachable TLS relay, legacy migration, native commands/fight
+  creation and clean stop. Old companion is rejected by Loader before startup.
+
+No hosted frontend was published and these checks did not restart the real
+server. Rendered real-client/no-mod login, poor-connection playback, full live
+modpack gameplay and live TPS/heap profiling remain manual checks. Native codec
+testing does not claim a rendered client connection. Fixture logs/reports are
+kept under local workspace `work/`; final jar/deployment metadata are recorded
+separately. See [Workshop upgrade](WORKSHOP.md) and [Playtest checklist](PLAYTEST_CHECKLIST.md).
+
+## Example addon and manual playtest guide — 2026-10-12
+
+Corrected the lightning example's stale 0.1 build dependency and broad runtime
+requirement. Its build now reads the parent's configured core version/archive
+name, requires that exact built jar, and writes the same version into Fabric
+metadata. While the API is experimental, rebuilding after a core version change
+is explicit rather than promising compatibility across untested builds.
+
+Java 25 / Gradle 9.7.0 / Loom 1.18.2 offline example `jar sourcesJar` succeeded.
+Addon 0.1.1 is compiled against and requires `0.2.0-beta.3`. The packaged
+`../outputs/clockwork_lightning_example-0.1.1.jar` is 5,698 bytes; metadata is
+fully expanded and no core classes/nested core jar are bundled. SHA256:
+`3CE1B35F6C28D58947936931B571A428EBFE192D3240D6F3F2ADBDEEBF0C3328`.
+Manifest: `../work/lightning-addon-011-build.json`. No tests or Minecraft
+sessions were run; no server/client installation or core version promotion occurred.
+
+Added `PLAYTEST_CHECKLIST.md`: 101 manual scenarios with setup, commands, expected
+results and a failure report form, including optional multiplayer, permissions,
+addon and workshop checks. These are planned checks, not recorded passes.
+Linked it from README/compatibility docs and updated example/API documentation.
+Wiki now has the same playtest page, Home/sidebar/testing links and corrected
+addon build/dependency instructions. All writes were staged and hash-checked;
+no commit or push occurred.
+
+## Semantic version correction — 2026-10-11
+
+Changed the single `mod_version` property from `0.2.beta.3` to `0.2.0-beta.3`.
+Fabric Loader 0.19.5's local source splits the prerelease at the hyphen, then
+parses each numeric core component; the old dot before beta caused the reported
+warning. Gradle supplies this property to the runtime metadata and archive name.
+Gameplay, schema, protocol and dependency declarations are unchanged. Existing
+artifacts and historical test records keep their original names. No new tests
+or Minecraft sessions were requested or run for this metadata correction.
+
+Offline Java 25 / Gradle assemble succeeded. Inspected the corrected universal
+`../outputs/clockwork_bosses-0.2.0-beta.3.jar` against the previous artifact:
+entry names match, and only `fabric.mod.json` differs, solely in its version.
+The output is 1,034,790 bytes; SHA256:
+`8CF42B58D2DD3585C93EDEAFFB2325BC838B32AC0982BC2545C92DD146B45C5E`.
+The old beta.3 jar is preserved. Wiki Home now explains the naming convention
+and separates earlier installed builds from this newly packaged one. No
+deployment, commit or push occurred. Manifest: `../work/semver-correction-build.json`.
+
+## 0.2.beta.3 sound-distance checks — 2026-10-11
+
+New default templates and all seven bundled presets explicitly use range 0 for
+activation/spawn, phase-change, death, custom roar and voice-line audio. It means
+the arena/boss-bar radius or full inclusive box diagonal, resolved before packets
+with a 32-block fallback and 512-block cap. Positive manual settings retain their
+meaning; phase/legacy roar null fields inherit. Old omitted/null base fields stay
+at 32, including their virtual native editor inputs. Core registered roar action
+settings have a declared Auto default. Music/audience, packet layout and existing
+media/cache/transfer budgets are unchanged.
+
+Java 25 / Gradle 9.7.0 / Loom 1.18.2 offline common/client compilation and schema
+export passed. The focused checks passed 189 assertions; the complete existing
+offline suite passed 5,216 assertions. They check creation/legacy omission,
+manual bounds, voice compilation, inclusive/reversed/maximal/invalid boxes,
+radius versus diameter, float boundaries, final packet guards, schema contracts
+and legacy/registered roar defaults/inheritance. No Minecraft process, in-game
+audio, latency/modpack tests, live schema command or server/client installation
+was performed. The companion chat owns copying the export and combined testing.
+
+Independent Draft 2020-12 validation confirmed both schemas: 14 accepted and 11
+rejected existing fixtures, plus 28 accepted and 18 rejected audio-distance cases.
+The initial system Python invocation could not load the existing CPython 3.12
+validator wheel; rerunning with the configured bundled runtime passed without
+installing or changing dependencies.
+
+Offline assemble packaged `../outputs/clockwork_bosses-0.2.beta.3.jar` (1,034,788
+bytes), verified matching client/common entrypoints, sound-distance/pupil/editor
+classes, all seven presets and new base defaults. No website assets or development
+checks are packaged. SHA256:
+`5E409575A977D6F32273254E9123DADD19F01865CA9199F6BDCD58C228871615`.
+The previous beta.2 artifact remains intact. The settled export is
+`build/template-schema.json`, SHA256
+`000E98416AD00FE87A8F2C09CA595ADD1F123D315C23AAA098E9602EC38B5F8E`.
+Wiki sound/config/API pages were staged and hash-checked before updating; no
+commit, push, website deployment or real/test-server installation was performed.
+Build manifest: `../work/sound-distance-build.json`.
+
+## 0.2.beta.2 packaging and workshop publication — 2026-10-11
+
+Offline Java 25 / Gradle assemble packaged the current pupil implementation and
+native editor as `clockwork_bosses-0.2.beta.2.jar`. Both common/client entrypoints
+and pupil classes are present; website assets and development check classes are
+absent. Output SHA256:
+`9AFB06F82093F4BF348865CB2EA484C0B7AED95CA064AA51D8053D9F25623F88`.
+The same jar serves client/server. This request supplied the jar without
+replacing their installed copies, starting Minecraft or running tests.
+
+Read the companion's current Cloudflare workflow. Its asset helper prepared the
+25 explicitly allowed public editor files, including pupil controls, preview,
+presets and the shared schema. Wrangler deployed the existing workshop Worker
+and custom domain with version `8bcd8402-0fda-4337-9e3e-ffb3ef6bcedf`.
+The UI lives at `https://workshop.clockworkboss.com`; no frontend was bundled in
+the mod and no relay/authentication/configuration code changed. Website syntax
+checks preceded packaging; no new browser or runtime tests were run. Install the
+new core on the server for a connected editor to receive its pupil definitions.
+
+Earlier source-only notes below describe the stage before this packaging pass.
+
+## Adjustable pupils — 2026-10-11, source only
+
+Added `skin.glowing_pupils` to creation defaults, all bundled mod/website presets,
+field descriptions and the exported schema. Enabled defaults true; X/Y scale
+0.5–8 rounds to 1–8 pixels (1 = one pixel). Left/right offsets are integers -1–7;
+-1 automatically follows the inner X or bottom Y edge. Size and offset clip to
+the eye. Legacy automatic one-pixel pupils remain hidden on one-pixel-wide/high
+eyes; explicit positions/sizes can fill them. Existing templates retain their
+appearance when this section is omitted.
+
+The native preview has its own collapsible Pupils section and a Both/Left/Right
+cross pad with position Reset. The website uses the same exported limits/defaults
+and draws the same darker rectangles, including overlap order. It preserves
+omitted/unknown data; an older connected server schema hides unsupported controls.
+One appended native integer synchronizes settings; existing metadata slots retain
+their IDs and the optional-client filter removes the new slot too. Normal Wardens
+retain their native rendering. Modded clients need a matching updated core build.
+
+Java 25 offline common/client compilation and schema export succeeded. Website
+JavaScript syntax checks passed. No tests, Minecraft sessions, packaging or jar
+deployment occurred. Installed `0.2.beta.1` does not yet include pupil controls.
+Runtime pixel alignment, GUI scale behavior and saves remain to be checked.
+
+## 0.2.beta.1 packaging and deployment — 2026-10-11
+
+Packaged the current source as the owner's requested `0.2.beta.1` version with
+Java 25 / Gradle 9.7.0 / Loom 1.18.2 offline `assemble`. It includes experimental
+API revision 1, optional-client support, later schema/potion changes, Fabric v1
+permissions and the compact workshop GUI. Archive inspection confirmed the
+expanded version/entrypoints and compact theme, with no GameTest/audit/clientcheck
+classes in the runtime jar. This deployment ran no tests or game sessions.
+
+Confirmed Test Client stopped and a fresh direct-SFTP server log ending in
+shutdown. Its mods folder was empty after the no-client test. Installed the
+universal beta and matching Fabric API 0.161.0+26.3 there; backed up and replaced
+the server's 0.1 jar. Downloaded staged and installed server bytes and compared
+SHA256 to the output/client: `8BC54F49CF701EF48E8D69B81878A1529AFF74394A08D6E74C249C628CE39D9C`.
+Both installs contain one boss jar. Unrelated remote mod names/sizes are unchanged.
+No templates, worlds, running Clockwork Town profile, commits or GitHub uploads
+were changed. The agent did not restart either application. Installation details
+and backups are recorded in `../work/beta02-deployment.json`. Runtime checks of
+the beta GUI, permissions and experimental API remain pending.
+
+Earlier source-only entries below record their status before this packaging pass.
+
+## Compact workshop GUI — 2026-10-11, source only
+
+Matched the live workshop palette: brown panels, copper accents, brass headings
+and cream text. Native-font controls are 18 GUI units high; section headers use
+24-unit rows and ordered phase/reward lists use 36-unit rows. Field layouts pair
+compatible scalar controls when space permits and stack labels at narrower
+widths. Full-width filenames and structured values retain their space. The
+preview and picker use the same theme; a stacked model leaves room for controls.
+Expanded help is toggled with **?**, alongside the bottom actions. Darkness notes,
+field tooltips, native editing/focus/narration and unsaved draft retention remain.
+
+Source inspection checked shared placement/scroll bounds, footer spacing at the
+normal 320x240 minimum, and matching compact drag/render/click geometry. Java
+25.0.4.1 / Gradle 9.7.0 / Loom 1.18.2 offline `compileJava compileClientJava`
+succeeded after the final changes against the configured Minecraft 26.3 sources.
+No tests, client/server launch, packaging or deployment were performed. Inspect
+the editor at several GUI scales before release: long/nested labels, dropdowns,
+Save/Reload/Cancel, expanded help, preview cross pads and phase/item list scrolling.
+
+## Fabric v1 permissions — 2026-10-11, source only
+
+Added 16 immutable permission nodes for `/boss` operations through Fabric's
+installed Permission API v1. Native Boolean game-master fallback keeps default
+operator access; explicit provider grants/denials take precedence. Registration
+and execution handlers share the catalog. Editor requests distinguish template
+editing, preset editing and global reload; selector clicks verify stored session
+rights, including both nodes for combined selection. Own-session Close/Cancel
+still work after revocation. Permissions do not add a tick watcher or grant cache.
+
+Java 25.0.4.1, Gradle 9.7.0 and Loom 1.18.2 offline `compileJava compileClientJava`
+succeeded after the final code changes, against Minecraft 26.3 / Fabric API
+0.161.0+26.3. LuckPerms' upstream Fabric v1 listener was inspected to confirm
+namespaced slash IDs become dotted Boolean nodes. No tests, game launch,
+packaging, deployment, commit or push were performed for this change. Provider
+runtime checks remain listed in [PERMISSIONS.md](PERMISSIONS.md); earlier release
+results do not cover it.
+
+## Potion death and grave recovery — 2026-10-11, source only
+
+Reproduced the owner's death -> grave capture -> encounter end -> item recovery
+case with supplied Universal Graves **3.13.0+26.3**. The prior source saved the
+marked bottle in the actual grave before `AFTER_DEATH` cleaned the inventory.
+The new native `ServerPlayer.die` hook releases the bottle immediately before
+death loot, restoring only the unchanged live personal offhand before capture.
+Canceled death and totem survival retain the bottle. keepInventory still removes
+the temporary grant on committed death. Older stored copies are removed on
+attempted use without membership; existing graves/containers are not scanned.
+
+Common/client compilation and **5,013 offline assertions** passed. All **33
+native GameTests** passed without third-party mods, including ordinary death
+drops/pickup, native respawn, keepInventory, a Fabric death veto, totem survival
+and old-copy use cleanup. All **33 GameTests** also passed in the supplied
+server pack: the actual grave contained no fight potion, its personal offhand
+and ordinary potion were recovered once after the boss was removed.
+Embedded death fixtures acknowledge the native 26.3 world-loaded packet before
+damage; otherwise the server rejects damage and cannot verify these cases.
+
+Early pack runs stalled at shutdown after passing assertions. The fixture used
+the grave's occupied block as its forced respawn checkpoint, causing fallback
+to world spawn and unrelated chunk generation near shutdown. A separate
+checkpoint in the loaded test area, asserted after native respawn, fixed that
+fixture. All 33 tests now pass with normal shutdown in the supplied pack and in
+a narrower exact Graves/Lithium/Polymer comparison. Gameplay code needed no
+chunk-ticket workaround. Diagnostic reports from the early runs are retained.
+No jar was packaged/deployed, no installed server/client files or live worlds
+were edited, and no real client/network latency test was performed.
+
+## Potion cleanup and schema review — 2026-10-11, source only
+
+`/boss remove` now releases support even for a marked entity without runtime
+state and clears orphaned fight bottles from online player inventories/cursors.
+Remaining encounters retain their potion grants. Cleanup sends Minecraft's full
+inventory state to correct stale client slot caches; unaffected orphan-scan
+participants receive no inventory packet. No new watcher or recurring check.
+
+Schema revision 2 distinguishes creation defaults from omitted behavior, exports
+the same conditional-control rules as the GUI, shares the core roar's OGG
+filename validation, and accepts runtime-supported null sequence controls/loot.
+Hidden values and unknown addon data remain preserved. Format revision stays 1.
+Common/client compilation and **5,013 offline assertions** passed, including
+**628 template checks**. Independent schema validation accepted 14 valid fixtures
+and rejected 11 invalid ones. All **29 native GameTests** passed in the isolated
+development server, including the remove command, offhand restoration, cursor/
+inventory copies, orphan bottles, overlap and full inventory packet delivery.
+Two old Sonic Boom test expectations were corrected to verify the API's already
+implemented phase/reload interruption contract; combat implementation unchanged.
+The original single-boss removal path passed before the fix, so these tests do
+not prove the reported real client's underlying cause. Retest that client after
+packaging. No jar packaging, deployment, live world edits or Git upload occurred.
+
+## Template schema foundation — 2026-10-11, source only
+
+Common/client compilation, `auditChecks`, `exportTemplateSchema` and
+`exportSchemaFixtures` succeeded offline with the configured Java 25/26.3 build.
+The suite passed **4,947 assertions**, including **562 template-contract checks**.
+An independent Draft 2020-12 validator accepted both generated schemas, all seven
+presets, the default document and a sample addon; six invalid fixtures were rejected.
+An isolated loader proved the portable format codec works with no Minecraft/Fabric
+classes available. Covered version rejection, duplicate keys, UTF-8/nesting bounds,
+opaque fields, large numeric tokens, explicit nulls, nested reserved-like keys,
+phase order and repeated saves. The GUI hides the format version and shares the
+API's null/default behavior. See [tooling guide](TEMPLATE_SCHEMA.md).
+
+No jar was packaged or deployed for this work. The previously supplied
+`0.1-client-optional.1` artifact predates it. Live schema-command execution,
+in-game default-reset controls and a browser editor remain untested/pending.
+No installed config, world, source commit or GitHub upload was changed.
+
+## Optional-client test jar packaged — 2026-10-11
+
+Packaged the current development source as `0.1-client-optional.1`, using a
+command-line version override so the project's base `mod_version=0.1` stays
+unchanged. Offline `jar sourcesJar` succeeded with Java 25 / Loom 1.18.2. No
+test tasks or game/server launch were run. This includes the experimental API
+revision 1 and its later safety changes, plus the optional-client adapter.
+
+Universal client/server test jar:
+`../outputs/clockwork_bosses-0.1-client-optional.1.jar`, 990489 bytes.
+SHA-256: `87D12C2ADC2CFB99377222928FE36C9520ED379ECACB1E799827B3336AB66CAE`.
+Source jar remains in `build/libs/`; artifact record:
+`../work/client-optional1-build.json`. These local evidence paths are outside
+version control and may be absent from a clone.
+
+Inspected the packaged name/version, enabled tracking mixin, adapter/API/client
+classes and absence of development test-mod entries. The output copy's SHA-256
+matches the build. This confirms packaging, not runtime mixin or multiplayer
+behavior. Provided for the owner's test using a client without Clockwork Bosses;
+server gameplay, native boss bars/particles/scale/support and normal Warden
+appearance should remain. Mixed-client/reconnect/modpack verification is pending.
+No installed jar, config, world, source Git commit or wiki push was changed.
+
+## Optional-client source change — 2026-10-11
+
+Added a Warden metadata adapter for players without Clockwork Bosses. Inspected
+the configured 26.3 ServerEntity pairing/dirty-update bytecode and Fabric 0.161.0
+networking sources: play-channel registrations carry into the play listener, and
+the native synchronizer supports recipient-filtered broadcasts. The existing core
+editor receiver identifies a modded client without another handshake or watcher.
+It does not verify the jar version or grant permissions.
+
+The adapter filters all twelve actual core visual accessor IDs and shifts later
+other-mod Warden IDs while preserving serializers/values. Modded recipients keep
+original packets, non-Warden/attribute traffic keeps its original call, and empty
+fallback metadata is not sent. Ordinary Wardens use the adapter too. Existing
+media receiver guards and editor permission checks remain in use. Server mechanics
+and native presentation continue for clients without the mod; skins/glow/custom
+audio/editor and enhanced animation timing require a matching client build.
+
+Offline `compileJava compileClientJava` succeeded with Java 25 / Loom 1.18.2.
+No tests, game launch, packaging or deployment were performed. Mixed recipients,
+initial/late tracking, reconnect/dimension changes, high boss HP and other-mod
+Warden metadata need runtime verification before production use. The installed
+0.1 jar lacks this fallback; recorded release checks do not cover the new source.
+
+## API safety source review — 2026-10-10
+
+Reviewed startup registration, schemas/editor saves, context access, native action
+hooks, events, interruption/unload cleanup, temporary persistence and burrow.
+Added server-thread checks, protected snapshot cleanup, reentrant transition
+guards and deferred replacement startup, relocation ownership checks, early
+permission-query handling, 32-bit integer schema bounds, and temporary entity
+portal/cross-dimension rejection. The new native Entity signatures were inspected
+in the configured 26.3 bytecode. Offline `compileJava compileClientJava` succeeds
+with Java 25 and Loom 1.18.2. No tests, game launch, packaging or deployment in
+this review; runtime mixin/modpack and lifecycle checks remain pending. See
+[API_SECURITY_REVIEW.md](API_SECURITY_REVIEW.md) for findings and trust limits.
+
+## Pending addon API revision 1
+
+The [API foundation](API.md) is a later source change. Common/client Java,
+existing development sources and the independent lightning addon compile;
+development jars are packaged. The following runtime checks remain pending,
+and the recorded 0.1 results do not cover them:
+
+- Legacy combat/recovery and native roar preserve timing, targeting and cooldowns.
+- Server-only addon controls appear, validate and save without an addon client.
+- Type changes, stale saves, missing addons and unknown fields behave as documented.
+- Completion, phase change, reload, death, remove, unload and shutdown close each scope once.
+- Temporary entities do not persist through chunk/passenger saves.
+- Mid-burrow save/restart restores the surface position and original flags.
+- Burrow follows the current player's latest position; leaving/dead/disconnected targets
+  use eligible replacements, and blocked/unloaded/hazardous destinations fall back.
+- Scaled burrow fits its standing body, stays in the arena, and resumes the next action;
+  interruption during emergence retains its committed destination.
+- Radius arenas retain membership/support/music while buried and follow the emergence.
+- Encounter events have committed snapshots and failures do not skip other listeners.
+- Lithium/Sodium/ETF/EMF and the supplied pack retain compatibility with the new save guard.
+
+## Recorded 0.1 release checks
+
+| Check | Recorded result |
+| --- | --- |
+| Config/media audit | 4384 assertions passed |
+| Native GUI | 1038 assertions passed |
+| Server suite without supplied pack | 28/28 passed |
+| Server suite with supplied pack | 28/28 passed |
+| Packaged production jar | Readiness, spawn/activate/save/remove, normal exit code 0 |
+| GUI stack / sizes | Sodium, Lithium, ETF, EMF; 320x240, 640x360, 1280x720 GUI units |
+| Jar metadata | 0.1, seven presets, development fixtures excluded |
+
+Numeric checks cover 128-character text, 64 significant digits and decimal
+scale -64 to 64. Exact comparisons reject just-outside values. Imported extremes
+display compactly and must validate before edited values save.
+
+Reports in the original development workspace:
+
+- `../work/release01-results.json`
+- `../work/release01-native.xml`
+- `../work/release01-modpack.xml`
+- `../work/release01-production-result.json`
+- `../work/release01-loot-gui-result.txt`
+
+These paths are outside version control and may be absent in a clone.
+The results file records counts, report hashes and untested scenarios.
+
+Recorded artifact: `../outputs/clockwork_bosses-0.1.jar`, 914046 bytes.
+SHA-256: `A62B75E8DD3F28E5286010A6E6350F3FED0CE25144BC37892ED283CF42DDA3B6`.
+
+`../work/release01-deployment.json` records matching Test Client/test-server
+installs after RC8 backups, both hashes verified, with one boss jar per folder.
+Templates/media/worlds were preserved; neither application was started by
+deployment. This is dated evidence rather than a current running-status check.
+
+## Build and package
+
+1. Confirm `gradle.properties`, Java 25 and the checked-in Gradle 9.7.0 wrapper.
+2. Build with `.\gradlew.bat build` or `bash ./gradlew build`.
+   The standalone `auditChecks` gate is included.
+3. For code verification, run `.\gradlew.bat runGametest` or
+   `bash ./gradlew runGametest`. The world is disposable under
+   `build/combat-gametest`.
+4. For relevant client changes, use `runClientcheck` model checks or
+   `runClientlootcheck` GUI checks. Require the explicit PASS result;
+   normal process exit alone is insufficient.
+5. Inspect jar version/name/entrypoints, preset resources and intended classes.
+   Development test mods/fixtures must be excluded.
+6. Verify mixin changes with native startup; compilation alone cannot validate
+   every runtime injection signature.
+7. Record the exact artifact hash and checks run. Keep compile-only, native
+   model, GUI and multiplayer evidence distinct.
+
+Local compatibility init scripts under `../work/` are not shipped in a clone.
+[Compatibility testing](COMPATIBILITY_TESTING.md) records versions and scope.
+
+## Install
+
+1. Back up templates, media, worlds and replaced jars.
+2. Use Minecraft 26.3, Java 25 or later, Loader 0.19.5 and API 0.161.0+26.3
+   for the targeted setup.
+3. Install matching boss jars on the server and every client, then restart.
+   `/boss reload` does not load new Java code.
+4. Verify actual installed bytes and one boss jar per folder. A mounted cache
+   alone is not independent remote read-back.
+5. Preserve existing data unless deliberately editing it. Missing old support
+   sections stay disabled, and existing presets are not overwritten.
+6. Move older development layouts into template-local folders manually;
+   there is no automatic folder migration.
+
+## Check an encounter
+
+Use the actual matching clients and resource packs in a disposable arena.
+
+- Replace example spawn/regions; test entry, redstone and manual activation.
+  Redstone pulses need at least ten ticks.
+- Check dormancy, emergence, arena entry/exit and saved boss restoration.
+- Cross health cutoffs, heal back, reload during a charge and change targets
+  during delayed melee. Check captured attacks and cancelled wind-ups.
+- Test sequential/random subphases, roar interludes and Recovery interruption.
+- Check skins, eyes/brows, glow/flash and particles in each phase with actual
+  renderer mods and models/resource packs.
+- Test event/voice clips, music entry/exit/fade, sliders, category stopsound,
+  resource/device reload and reconnect.
+- Test support with normal/higher-health armor, late entry, overlaps and
+  exit/reentry/death/reconnect.
+- Test potion interruption/copies/cooldowns, full inventory, moved/changed offhand
+  items and grave recovery. No personal item should be lost or duplicated.
+- Test actual deaths, loot sources, Keep/Replace, empty lists, chance endpoints
+  and multiplayer kill attribution.
+- Save/reload templates/presets and inspect the server-owned file. Preset edits
+  affect future copies; a hosting-panel cache alone does not verify persistence.
+- Remove encounters, including saved instances in unloaded chunks before
+  deleting templates. Removal commands reach loaded entities only.
+
+Capture a reproducible issue with `/boss debug` and save a dump.
+[The compatibility guide](COMPATIBILITY_TESTING.md) explains event limits.
+
+## Still untested
+
+Real multiplayer latency, full-pack client play, heap profiling/performance
+benchmarks and enabled external network services were not covered by the
+recorded 0.1 run. Embedded players verify server logic, not real packet decoding
+or login/reconnect.
+
+Better Combat and Combat Roll were absent from the snapshot. Test their actual
+combat/potion/invulnerability behavior, Universal Graves recovery and the
+actual resource packs. [Modpack testing](MODPACK_TESTING.md) lists excluded
+services and known nonfatal warnings. A passing suite does not establish an
+error-free pack or universal compatibility.
+
+## Earlier build records
+
+These notes preserve the original build and review evidence. Version, installation,
+publication and pending-test statements describe when each note was written.
+Use the current sections above for setup and behavior. A later pass does not
+turn an earlier compile-only check into a playtest.
+
+Local `../work/` and `../outputs/` paths refer to the original development
+workspace. They are outside version control and may be absent in a clone.
+
+<details>
+<summary>Expand the dated notes and technical evidence</summary>
 
 ## Beta RC 8 local loot editor checks — 2026-10-10
 
@@ -363,7 +880,7 @@ Gradle 9.7.0 offline `build` succeeds with the project's Fabric Loom 1.18.2 setu
 - The player-skin builder now starts from a fully transparent Warden atlas and uses the vanilla atlas only as a mask for removing the dark base jaw. The glowing emissive layers remain a separate render path. The new no-base-texture result still needs an in-game visual check.
 - The client and dedicated-server jars are the same Fabric artifact because the mod metadata includes both common and client entrypoints in one `environment: "*"` jar.
 
-## Current audit — 2026-10-07, version 1.0.1
+## Audit recorded — 2026-10-07, version 1.0.1
 
 - Common/client compilation succeeds against Java 25, Minecraft 26.3, Fabric Loader 0.19.5, API 0.161.0+26.3 and pinned Loom 1.18.2. Gradle 9.7.0 deprecation checks are enabled for the audit.
 - The dependency-free production-helper suite passes 4161 assertions. Generated templates preserve explicit phase sound `file: null` and `scale: null`, emit explanatory `//` comments before fields, round-trip unknown values and readable punctuation, and reject the previously reported missing-colon sound syntax.
@@ -696,3 +1213,5 @@ Audience-only title stamps can be replaced by a personal warning; personal warni
 User agreed to automatic arena sizing. follow_range=0 resolves to moving-radius distance or fixed-box full 3D diagonal, capped at 256, with 24-block unset fallback. Calculated only at phase assignment/reload from cached geometry. New bundled default/presets use zero base and null phase ranges; existing installed templates are not rewritten. Regenerated all seven source presets with grouped section comments and new targeting fields.
 
 Java 25 / Gradle 9.7.0 / Loom 1.18.2 offline compileJava compileClientJava succeeded after the final changes. This also compiled the pending saturated-preview refinement. No tests, game launches, packaging or deployment were performed. Installed jars remain Preview.23; next packaged version should be Preview.24. Runtime targeting/alerts/visual confirmation remains outstanding.
+
+</details>

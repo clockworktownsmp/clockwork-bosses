@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Isolated checks/fixtures must not contend over Minecraft's logs/latest.log. -->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="[%level] %msg%n"/>
+    </Console>
+  </Appenders>
+  <Loggers><Root level="info"><AppenderRef ref="Console"/></Root></Loggers>
+</Configuration>

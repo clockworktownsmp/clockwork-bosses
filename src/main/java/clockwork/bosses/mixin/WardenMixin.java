@@ -9,6 +9,7 @@ import clockwork.bosses.ClockworkBossSettings;
 import clockwork.bosses.ClockworkBossMobSounds;
 import clockwork.bosses.ClockworkBossLegacyData;
 import clockwork.bosses.ClockworkBossChargeVisual;
+import clockwork.bosses.ClockworkBossClientData;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import clockwork.bosses.ClockworkBossTemplateNames;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
@@ -46,6 +47,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /** Adds persistent Clockwork Boss identity and dormant state to vanilla Wardens. */
 @Mixin(Warden.class)
 public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossRewardData {
+    @Unique private clockwork.bosses.ClockworkBossBurrowCheckpoint clockworkBosses$burrowCheckpoint;
+    @Override public clockwork.bosses.ClockworkBossBurrowCheckpoint clockworkBosses$getBurrowCheckpoint() { return clockworkBosses$burrowCheckpoint; }
+    @Override public void clockworkBosses$setBurrowCheckpoint(clockwork.bosses.ClockworkBossBurrowCheckpoint checkpoint) { clockworkBosses$burrowCheckpoint = checkpoint; }
     // Only a marked boss allocates a pending reward. Taking it releases damage-source/attacker references.
     @Unique private boolean clockworkBosses$rewardClaimed;
     @Unique private ClockworkBossRewards.DeathReward clockworkBosses$pendingReward;
@@ -139,7 +143,8 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
         clockworkBosses$localFlashTick = Integer.MIN_VALUE;
     }
 
-    // These fields are synchronised with the client through vanilla entity metadata.
+    // These fields use native metadata for modded clients. ServerEntityMixin
+    // removes only these slots from packets sent to clients without this mod.
     @Unique private static final EntityDataAccessor<Boolean> clockworkBosses$IS_CLOCKWORK_BOSS =
             SynchedEntityData.defineId(Warden.class, EntityDataSerializers.BOOLEAN);
     @Unique private static final EntityDataAccessor<Integer> clockworkBosses$EFFECT_COLOR =
@@ -168,7 +173,25 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
     // Append metadata so existing face/skin field IDs do not move.
     @Unique private static final EntityDataAccessor<String> clockworkBosses$MELEE_VISUAL =
             SynchedEntityData.defineId(Warden.class, EntityDataSerializers.STRING);
+    // Append so older visual slots retain their IDs. The optional-client filter also owns this slot.
+    @Unique private static final EntityDataAccessor<Integer> clockworkBosses$PUPILS =
+            SynchedEntityData.defineId(Warden.class, EntityDataSerializers.INT);
+    // Capture all allocated slots once, including ones whose default values
+    // might be omitted from a packet. Keep this list aligned when adding fields.
+    @Unique private static final ClockworkBossClientData clockworkBosses$CLIENT_DATA_LAYOUT =
+            new ClockworkBossClientData(clockworkBosses$IS_CLOCKWORK_BOSS, clockworkBosses$EFFECT_COLOR,
+                    clockworkBosses$PHASE_CHANGE_TICK, clockworkBosses$SKIN_PLAYER_NAME, clockworkBosses$SKIN_TYPE,
+                    clockworkBosses$CUSTOM_SKIN_FILE, clockworkBosses$TEMPLATE, clockworkBosses$MOB_SOUND_VOLUME,
+                    clockworkBosses$SONIC_VISUAL, clockworkBosses$EYES, clockworkBosses$BROWS,
+                    clockworkBosses$MELEE_VISUAL, clockworkBosses$PUPILS);
+    @Override public ClockworkBossClientData clockworkBosses$getClientDataLayout() {
+        return clockworkBosses$CLIENT_DATA_LAYOUT;
+    }
     @Override public int clockworkBosses$getBrows() { return ((Warden) (Object) this).getEntityData().get(clockworkBosses$BROWS); }
+    @Override public int clockworkBosses$getPupils() { return ((Warden) (Object) this).getEntityData().get(clockworkBosses$PUPILS); }
+    @Override public void clockworkBosses$setPupils(int settings) {
+        ((Warden) (Object) this).getEntityData().set(clockworkBosses$PUPILS, clockwork.bosses.ClockworkBossPupils.unpack(settings).packed());
+    }
     @Override public void clockworkBosses$setBrows(int coordinates) {
         ((Warden) (Object) this).getEntityData().set(clockworkBosses$BROWS, clockwork.bosses.ClockworkBossBrows.unpack(coordinates).packed());
     }
@@ -366,6 +389,7 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
         builder.define(clockworkBosses$SONIC_VISUAL, "");
         builder.define(clockworkBosses$EYES, clockwork.bosses.ClockworkBossEyes.DEFAULT.packed());
         builder.define(clockworkBosses$BROWS, clockwork.bosses.ClockworkBossBrows.DEFAULT.packed());
+        builder.define(clockworkBosses$PUPILS, clockwork.bosses.ClockworkBossPupils.DEFAULT.packed());
         builder.define(clockworkBosses$MELEE_VISUAL, "");
     }
 
@@ -438,7 +462,7 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
         // Also covers direct doHurtTarget calls outside Brain.tick: apply the
         // phase's native damage/knockback first, then gate that same snapshot.
         ClockworkBossSettings.Phase phase = ClockworkBossManager.prepareCombatPhase(warden);
-        if (phase == null || !phase.meleeEnabled()) {
+        if (phase == null || !phase.meleeEnabled() || !ClockworkBossManager.allowsNativeAttack(warden, clockwork.bosses.ClockworkBossActions.MELEE)) {
             if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, target, "melee_rejected", "reason", "locked_or_disabled");
             cir.setReturnValue(false);
             return;
@@ -468,7 +492,7 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
     private boolean clockworkBosses$nativeMelee(Warden boss,
             ServerLevel level, Entity target, Operation<Boolean> original) {
         boolean capture = ClockworkBossDiagnostics.enabled() && clockworkBosses$isClockworkBoss;
-        float before = capture && target instanceof LivingEntity living ? living.getHealth() : 0;
+        float before = (capture || clockworkBosses$isClockworkBoss) && target instanceof LivingEntity living ? living.getHealth() : 0;
         net.minecraft.world.phys.Vec3 velocity = capture ? target.getDeltaMovement() : null;
         if (clockworkBosses$isClockworkBoss) {
             clockworkBosses$meleeAttempt = true;
@@ -482,6 +506,8 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
         }
         if (capture) ClockworkBossDiagnostics.event(boss, target, "melee_native_attempt", "hp_before", before);
         boolean accepted = original.call(boss, level, target);
+        if (accepted && clockworkBosses$isClockworkBoss && target instanceof LivingEntity living)
+            ClockworkBossManager.onAttackLanded(boss, living, clockwork.bosses.ClockworkBossActions.MELEE, Math.max(0, before - living.getHealth()));
         if (capture) ClockworkBossDiagnostics.event(boss, target, "melee_native_result", "accepted", accepted,
                 "hp_before", before, "hp_after", target instanceof LivingEntity living ? living.getHealth() : 0,
                 "velocity_delta_x", target.getDeltaMovement().x - velocity.x,
@@ -530,6 +556,7 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
     private void clockworkBosses$saveBossData(ValueOutput output, CallbackInfo ci) {
         if (!clockworkBosses$isClockworkBoss) return;
         output.putBoolean("ClockworkBosses_Boss", true);
+        if (clockworkBosses$burrowCheckpoint != null) clockworkBosses$burrowCheckpoint.write(output);
         output.putBoolean("ClockworkBosses_RewardClaimed", clockworkBosses$rewardClaimed);
         if (clockworkBosses$healedPlayers != null && !clockworkBosses$healedPlayers.isEmpty()) {
             var healed = output.list("ClockworkBosses_HealedPlayers", net.minecraft.core.UUIDUtil.CODEC);
@@ -553,6 +580,7 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
      */
     @Inject(method = "readAdditionalSaveData", at = @At("TAIL"))
     private void clockworkBosses$loadBossData(ValueInput input, CallbackInfo ci) {
+        clockworkBosses$burrowCheckpoint = clockwork.bosses.ClockworkBossBurrowCheckpoint.read(input);
         clockworkBosses$pendingReward = null;
         clockworkBosses$rewardClaimed = input.getBooleanOr("ClockworkBosses_RewardClaimed", false);
         clockworkBosses$healedPlayers = null;

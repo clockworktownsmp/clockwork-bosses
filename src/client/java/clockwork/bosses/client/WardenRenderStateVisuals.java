@@ -8,6 +8,8 @@ public interface WardenRenderStateVisuals {
     void clockworkBosses$setEyes(int coordinates);
     int clockworkBosses$getBrows();
     void clockworkBosses$setBrows(int coordinates);
+    int clockworkBosses$getPupils();
+    void clockworkBosses$setPupils(int settings);
     /** A detached editor snapshot may show steady bright face glow; live entities never set this flag. */
     boolean clockworkBosses$isEditorPreview();
     void clockworkBosses$setEditorPreview(boolean preview);

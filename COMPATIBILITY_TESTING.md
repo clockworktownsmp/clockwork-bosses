@@ -1,17 +1,65 @@
 # Combat compatibility checks
 
-RC5 is installed in Test Client and the test server, with RC4 backed up. RC5
-adds opt-in diagnostics and a Recovery hook that preserves Lithium's optimized
-Brain implementations. Deployment record: `../work/beta-rc5-deployment.json`.
-The supplied integration jars were used only in isolated tests; no third-party
-mods were installed by this deployment.
+## Current merged workshop candidate
+
+`0.2.0-beta.4` contains the optional dedicated-server workshop. Remove its old
+companion jar, keep config/data, and install one core jar. Workshop requires
+native owner authority, separately from delegated boss editing nodes.
+[Workshop](WORKSHOP.md) explains migration; [Preflight](PREFLIGHT.md) separates
+automated checks from untested rendered mixed-client behavior. Older records
+below retain their original dates.
+
+Use this guide to capture one reproducible fight and judge the evidence.
+The project version is 0.1. RC4/RC5 results below describe those dated runs,
+rather than live installation or universal compatibility.
+
+For hands-on testing, use [the in-game playtest checklist](PLAYTEST_CHECKLIST.md).
+It covers a full evening of scenarios with setup, exact commands and expected
+results, plus optional addon, permission-provider and workshop checks. The
+checkboxes are a plan; recorded release results below are separate evidence.
+
+The 2026-10-10 release recorded 4384 audit assertions, 1038 native GUI assertions
+and 28/28 server tests with/without the supplied pack.
+[Preflight](PREFLIGHT.md) lists reports; [modpack testing](MODPACK_TESTING.md)
+explains isolation and current offhand safeguards.
+
+## Pending optional-client source — 2026-10-11
+
+Native Warden pairing and dirty metadata now choose a per-recipient wire layout.
+Clients advertising the core editor channel retain the original metadata; clients
+without it omit only our twelve visual fields. Later fields from other mods retain
+their values/serializers and close the removed ID gaps. Ordinary Wardens use the
+same adapter because their other-mod fields can have those gaps too. Non-Warden
+entities and native attribute/movement traffic use the original tracking calls.
+Other mandatory mods still need compatible client/server metadata layouts.
+
+Existing custom skin/sound/music sends already check their receiver channels.
+Server gameplay, native boss bars/particles/scale and support remain available;
+unmodded clients have vanilla appearance/animations and no custom file audio or
+editor. Client-local heartbeat volume and extended local boss-health display
+require the mod. Addons adding custom registries/renderers/packets may require it.
+Channel advertisement does not authenticate a player or verify a jar version;
+modded clients must still match the core build.
+
+Common/client compilation passed. Development test jar
+`clockwork_bosses-0.1-client-optional.1.jar` is packaged. No tests, game launch or
+deployment were performed. Before release, exercise these cases in a disposable setup:
+
+- One matching modded client and one client without Clockwork Bosses tracking the
+  same ordinary Warden and boss, including activation and every phase cutoff.
+- Joining while a boss is active, late tracking, reconnect and dimension changes.
+- Native particles, boss-bar health, scaled bodies, damage, support and rewards.
+- Full media/visual/editor behavior on the modded client, with no unsupported
+  metadata or custom-media traffic sent to the client without the mod.
+- A matching unrelated mod allocating Warden fields before/after our layout,
+  plus the intended Lithium/Sodium/ETF/EMF environment.
+
+The installed 0.1 release lacks this fallback; its older test results do not
+verify this later source change.
 
 ## Capture a fight
 
-RC6 local server-pack results and offhand safeguards are documented separately in
-[MODPACK_TESTING.md](MODPACK_TESTING.md); RC5 remains the last installed build.
-
-Operators use these commands on the server running RC5:
+Operators with native game-master permission use these commands on the server:
 
 1. `/boss debug on` starts a new capture and clears the previous one.
 2. Reproduce one scenario from the checklist below.
@@ -66,7 +114,7 @@ Cancellation reasons group target, phase, range, visibility and state changes.
 Compare adjacent events/generations; they do not attribute the change to a
 particular external mod. No diagnostic callback approves damage or changes AI.
 
-## Automated coverage and limitations
+## Recorded server checks and limitations
 
 The clean RC4 baseline passed 11 project native tests plus the vanilla control,
 and 4316 offline audit assertions. RC5 adds four native compatibility checks:
@@ -78,7 +126,17 @@ and 4316 offline audit assertions. RC5 adds four native compatibility checks:
 | Recovery / Brain timers | Native scheduled work pauses, cooldown memory expires, work resumes; an unmarked Warden runs normally | Every Lithium option/version or other Brain replacement |
 | Potion / inventory / external health | Non-operator command rejection; full-inventory safety; interruption; owner/copy/cooldown checks; original offhand and external modifier preservation | Better Combat weapon handling, graves, or real reconnect timing |
 
-Run from this project with the configured Java 25/Gradle environment:
+For portable checks, use Java 25 and the wrapper:
+
+```text
+.\gradlew.bat --offline auditChecks runGametest
+```
+
+Linux/macOS: `bash ./gradlew --offline auditChecks runGametest`.
+
+The commands below record the original local harness. The init scripts and
+supplied jars under `../work/` are outside version control; they must be present
+to repeat those integration runs:
 
 ```text
 gradle --offline auditChecks runGametest
@@ -101,10 +159,11 @@ control passed both without Lithium and with Lithium 0.26.2+mc26.3. The offline
 audit passed 4316 assertions. Logs and preserved reports are in `../work/`:
 `compatibility-native-final.log/.xml` and `compatibility-lithium-final.log/.xml`.
 
-## Client rendering integrations
+## Recorded client checks and visual scenarios
 
 The supplied snapshot includes Sodium 0.9.2+mc26.3, ETF 7.2.4 and EMF 3.3.8.
-Use the existing development client check with these supplied jars and Lithium:
+The recorded client check used these supplied jars and Lithium.
+Repeating it requires the local init script and integration jars:
 
 ```text
 gradle --offline -I ../work/render-compat-check.init.gradle runClientcheck
@@ -116,7 +175,7 @@ ordinary-Warden opt-out. They do not render an encounter, prove pixel colors,
 or exercise custom entity models from resource packs. Keep the startup/model
 result separate from the visual scenarios below; server tests cannot cover them.
 
-On 2026-10-09 this combined client run passed all 2700 native model component
+On 2026-10-09 the RC5 combined client run passed all 2700 native model component
 comparisons and exited normally. The log confirms all four supplied mod versions
 were loaded: `../work/compatibility-render-client.log`. No resource pack with a
 custom Warden model was supplied for this isolated run. The visual scenarios
@@ -166,5 +225,20 @@ start from the clean baseline before changing one integration at a time.
 - External player-health modifiers remain authoritative; the native armor math
   check verifies ownership cleanup, not every third-party attribute pipeline.
 
-There is no demonstrated cross-mod combat conflict or universal compatibility
-guarantee. Record passed, failed and not-run scenarios separately.
+Record passed, failed and not-run scenarios separately. Isolated checks do not
+establish every combat-mod interaction.
+
+## RC5 deployment record - 2026-10-09
+
+The original note below describes that deployment only.
+
+<details>
+<summary>Expand the RC5 installation note</summary>
+
+RC5 is installed in Test Client and the test server, with RC4 backed up. RC5
+adds opt-in diagnostics and a Recovery hook that preserves Lithium's optimized
+Brain implementations. Deployment record: `../work/beta-rc5-deployment.json`.
+The supplied integration jars were used only in isolated tests; no third-party
+mods were installed by this deployment.
+
+</details>

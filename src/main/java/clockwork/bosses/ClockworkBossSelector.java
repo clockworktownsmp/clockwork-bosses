@@ -1,5 +1,6 @@
 package clockwork.bosses;
 
+import clockwork.bosses.ClockworkBossPermissions.Action;
 import com.google.gson.JsonObject;
 import net.minecraft.ChatFormatting;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -11,7 +12,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -55,6 +55,7 @@ public final class ClockworkBossSelector {
     private static final String TARGET_BOSS_BAR = "bossbar";
 
     private static final Map<UUID, SelectionSession> SESSIONS = new HashMap<>();
+    private static final Map<UUID, UUID> OPENING = new HashMap<>();
 
     private ClockworkBossSelector() {}
 
@@ -146,7 +147,7 @@ public final class ClockworkBossSelector {
         });
 
         // Cancel runtime selection sessions when the server stops.
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> SESSIONS.clear());
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> { SESSIONS.clear(); OPENING.clear(); });
 
         // Remove stale selector arrows when a player reconnects after a restart/crash.
         ServerPlayerEvents.JOIN.register(ClockworkBossSelector::removeSelectorArrow);
@@ -164,6 +165,9 @@ public final class ClockworkBossSelector {
      * Starts a selection session for a template and gives the player a marked arrow.
      * The initial mode follows the template's current activation type when possible.
      */
+    /** Read the initial mode off-thread before creating a native selection tool.
+     * A generation token prevents a cancelled/replaced request from giving a
+     * stale arrow; disconnect and shutdown discard pending player identities. */
     public static int begin(
             net.minecraft.commands.CommandSourceStack source,
             String templateName,
@@ -172,23 +176,40 @@ public final class ClockworkBossSelector {
         return begin(source, templateName, target, false);
     }
 
+    public static int begin(net.minecraft.commands.CommandSourceStack source, String templateName,
+                            String target, boolean alsoBossbar) {
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("This command must be run by a player.")); return 0;
+        }
+        if (!TARGET_ACTIVATION.equals(target) && !TARGET_BOSS_BAR.equals(target)) return 0;
+        if (!selectionAction(target).require(source) || alsoBossbar && !Action.SELECT_ARENA.require(source)) return 0;
+        UUID token = UUID.randomUUID(); OPENING.put(player.getUUID(), token);
+        boolean queued = ClockworkBossTemplateTasks.submit(source.getServer(),
+                () -> ClockworkBossTemplateStore.load(templateName), (config, failure) -> {
+                    if (!OPENING.remove(player.getUUID(), token)
+                            || source.getServer().getPlayerList().getPlayer(player.getUUID()) != player) return;
+                    if (failure != null) source.sendFailure(Component.literal("Could not open selection: " + ClockworkBossTemplateTasks.reason(failure)));
+                    else beginLoaded(source, templateName, target, alsoBossbar, config);
+                });
+        if (!queued) {
+            OPENING.remove(player.getUUID(), token);
+            source.sendFailure(Component.literal("Template file worker is busy or stopping; try again shortly."));
+        }
+        return queued ? 1 : 0;
+    }
+
     /**
      * Starts an activation-area selection and can copy the same two-corner box
      * into the template's boss-bar visibility setting when the selection ends.
      */
-    public static int begin(
+    private static int beginLoaded(
             net.minecraft.commands.CommandSourceStack source,
             String templateName,
             String target,
-            boolean alsoBossbar
+            boolean alsoBossbar, JsonObject config
     ) {
         if (!(source.getEntity() instanceof ServerPlayer player)) {
             source.sendFailure(Component.literal("This command must be run by a player."));
-            return 0;
-        }
-
-        if (!ClockworkBossTemplateStore.exists(templateName)) {
-            source.sendFailure(Component.literal("Template does not exist: " + templateName));
             return 0;
         }
 
@@ -202,11 +223,16 @@ public final class ClockworkBossSelector {
             return 0;
         }
 
+        // Copying an activation selection into the arena changes two settings,
+        // so it needs both grants. Check before reading files or replacing a tool.
+        if (!selectionAction(target).require(source)
+                || alsoBossbar && !Action.SELECT_ARENA.require(source)) return 0;
+
         cancelInternal(player);
 
         String initialMode = TARGET_BOSS_BAR.equals(target) || alsoBossbar
                 ? MODE_AREA
-                : readTemplateMode(templateName);
+                : readTemplateMode(config);
 
         SelectionSession session = new SelectionSession(
                 UUID.randomUUID(),
@@ -253,16 +279,20 @@ public final class ClockworkBossSelector {
         return 1;
     }
 
-    /**
-     * Cancels the player's current selection session and removes the selector arrow.
-     */
+    /** Checks only this player's server-owned session; it grants cancellation, not file access. */
+    public static boolean hasSession(net.minecraft.commands.CommandSourceStack source) {
+        return source.getEntity() instanceof ServerPlayer player && (SESSIONS.containsKey(player.getUUID()) || OPENING.containsKey(player.getUUID()));
+    }
+
+    /** Cancels the player's own selection even after permission revocation, removing the arrow. */
     public static int cancel(net.minecraft.commands.CommandSourceStack source) {
         if (!(source.getEntity() instanceof ServerPlayer player)) {
             source.sendFailure(Component.literal("This command must be run by a player."));
             return 0;
         }
 
-        if (SESSIONS.remove(player.getUUID()) == null) {
+        boolean opening = OPENING.remove(player.getUUID()) != null;
+        if (SESSIONS.remove(player.getUUID()) == null && !opening) {
             source.sendFailure(Component.literal(
                     "You do not have an active Clockwork Boss selection."));
             return 0;
@@ -310,7 +340,7 @@ public final class ClockworkBossSelector {
      */
     private static void setFirstPosition(ServerPlayer player, BlockPos pos) {
         SelectionSession session = SESSIONS.get(player.getUUID());
-        if (session == null) {
+        if (session == null || session.busy) {
             return;
         }
 
@@ -360,110 +390,62 @@ public final class ClockworkBossSelector {
         int maxY = Math.max(session.pos1().getY(), pos.getY());
         int maxZ = Math.max(session.pos1().getZ(), pos.getZ());
 
-        try {
-            JsonObject config = ClockworkBossTemplateStore.load(session.templateName()).deepCopy();
-
-            if (TARGET_BOSS_BAR.equals(session.target())) {
+        String dimension = player.level().dimension().identifier().toString();
+        String size = (maxX - minX + 1) + " x " + (maxY - minY + 1) + " x " + (maxZ - minZ + 1);
+        saveSelection(player, session, config -> {
+            JsonObject area = new JsonObject(); area.addProperty("shape", "box");
+            area.addProperty("dimension", dimension);
+            area.add("min", blockToJson(minX, minY, minZ)); area.add("max", blockToJson(maxX, maxY, maxZ));
+            if (TARGET_BOSS_BAR.equals(session.target()) || session.alsoBossbar()) {
                 JsonObject bossBar = config.has("boss_bar") && config.get("boss_bar").isJsonObject()
-                        ? config.getAsJsonObject("boss_bar")
-                        : new JsonObject();
-                JsonObject area = new JsonObject();
-                area.addProperty("shape", "box");
-                area.addProperty("dimension",
-                        player.level().dimension().identifier().toString());
-                area.add("min", blockToJson(minX, minY, minZ));
-                area.add("max", blockToJson(maxX, maxY, maxZ));
-                preserveRadius(bossBar, "visibility_area", area);
-                bossBar.add("visibility_area", area);
-                config.add("boss_bar", bossBar);
-
-                ClockworkBossTemplateStore.save(session.templateName(), config);
-
-                player.sendSystemMessage(Component.literal(
-                        "Arena area saved (boss bar and player effects): "
-                                + (maxX - minX + 1) + " x "
-                                + (maxY - minY + 1) + " x "
-                                + (maxZ - minZ + 1)).withStyle(ChatFormatting.GREEN));
-            } else {
-                JsonObject activation = new JsonObject();
-                activation.addProperty("type", MODE_AREA);
-                activation.addProperty("shape", "box");
-                activation.addProperty(
-                        "dimension",
-                        player.level().dimension().identifier().toString()
-                );
-                activation.add("min", blockToJson(minX, minY, minZ));
-                activation.add("max", blockToJson(maxX, maxY, maxZ));
-                preserveRadius(config, "activation", activation);
-                config.add("activation", activation);
-
-                if (session.alsoBossbar()) {
-                    // Copy the exact activation cuboid and dimension so the user
-                    // only has to mark the shared area once. Keep boss-bar styling.
-                    JsonObject bossBar = config.has("boss_bar") && config.get("boss_bar").isJsonObject()
-                            ? config.getAsJsonObject("boss_bar")
-                            : new JsonObject();
-                    JsonObject visibilityArea = new JsonObject();
-                    visibilityArea.addProperty("shape", "box");
-                    visibilityArea.addProperty(
-                            "dimension", player.level().dimension().identifier().toString());
-                    visibilityArea.add("min", blockToJson(minX, minY, minZ));
-                    visibilityArea.add("max", blockToJson(maxX, maxY, maxZ));
-                    preserveRadius(bossBar, "visibility_area", visibilityArea);
-                    bossBar.add("visibility_area", visibilityArea);
-                    config.add("boss_bar", bossBar);
-                }
-
-                ClockworkBossTemplateStore.save(session.templateName(), config);
-
-                player.sendSystemMessage(Component.literal(
-                        "Player-enter-area activation saved: "
-                                + (maxX - minX + 1) + " x "
-                                + (maxY - minY + 1) + " x "
-                                + (maxZ - minZ + 1)).withStyle(ChatFormatting.GREEN));
-                if (session.alsoBossbar()) {
-                    player.sendSystemMessage(Component.literal(
-                            "The same area was also saved for boss-bar visibility and player effects.").withStyle(ChatFormatting.GREEN));
-                }
+                        ? config.getAsJsonObject("boss_bar") : new JsonObject();
+                JsonObject visibility = area.deepCopy(); preserveRadius(bossBar, "visibility_area", visibility);
+                bossBar.add("visibility_area", visibility); config.add("boss_bar", bossBar);
             }
-
-            cancelInternal(player);
-        } catch (Exception e) {
-            player.sendSystemMessage(Component.literal(
-                    "Could not save selection: " + e.getMessage()).withStyle(ChatFormatting.RED));
-        }
+            if (TARGET_ACTIVATION.equals(session.target())) {
+                area.addProperty("type", MODE_AREA); preserveRadius(config, "activation", area);
+                config.add("activation", area);
+            }
+        }, (TARGET_BOSS_BAR.equals(session.target()) ? "Arena area saved (boss bar and player effects): "
+                : "Player-enter-area activation saved: ") + size
+                + (session.alsoBossbar() ? ". The same area controls boss-bar visibility and player effects." : ""));
     }
 
-    /**
-     * Saves one clicked block as the redstone activation trigger and ends the session.
-     */
+    /** Save only captured block/dimension data; no worker reads the player or world. */
     private static void setRedstonePosition(ServerPlayer player, BlockPos pos) {
         SelectionSession session = SESSIONS.get(player.getUUID());
-        if (session == null || !TARGET_ACTIVATION.equals(session.target())) {
-            return;
-        }
-
-        try {
-            JsonObject config = ClockworkBossTemplateStore.load(session.templateName()).deepCopy();
-            JsonObject activation = new JsonObject();
-            activation.addProperty("type", MODE_REDSTONE);
-            activation.addProperty(
-                    "dimension",
-                    player.level().dimension().identifier().toString()
-            );
+        if (session == null || session.busy || !TARGET_ACTIVATION.equals(session.target())) return;
+        String dimension = player.level().dimension().identifier().toString();
+        saveSelection(player, session, config -> {
+            JsonObject activation = new JsonObject(); activation.addProperty("type", MODE_REDSTONE);
+            activation.addProperty("dimension", dimension);
             activation.add("position", blockToJson(pos.getX(), pos.getY(), pos.getZ()));
-            preserveRadius(config, "activation", activation);
-            config.add("activation", activation);
+            preserveRadius(config, "activation", activation); config.add("activation", activation);
+        }, "Redstone activation block saved: " + pos.getX() + ", " + pos.getY() + ", " + pos.getZ());
+    }
 
-            ClockworkBossTemplateStore.save(session.templateName(), config);
-
-            player.sendSystemMessage(Component.literal(
-                    "Redstone activation block saved: "
-                            + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()).withStyle(ChatFormatting.GREEN));
-            cancelInternal(player);
-        } catch (Exception e) {
-            player.sendSystemMessage(Component.literal(
-                    "Could not save redstone activation: " + e.getMessage()).withStyle(ChatFormatting.RED));
+    /** Read-modify-write under the shared file lock; keep the arrow when a save
+     * fails so the operator can retry. Accepted edits may finish after cancel,
+     * but their completion cannot remove a newer selection tool. */
+    private static void saveSelection(ServerPlayer player, SelectionSession session,
+                                       java.util.function.Consumer<JsonObject> edit, String success) {
+        if (session.busy) return;
+        session.busy = true; String name = session.templateName();
+        var server = player.level().getServer();
+        boolean queued = ClockworkBossTemplateTasks.submit(server, () -> {
+            ClockworkBossTemplateStore.edit(name, edit); return name;
+        }, (saved, failure) -> {
+            session.busy = false;
+            if (server.getPlayerList().getPlayer(player.getUUID()) != player) return;
+            if (failure == null) {
+                if (SESSIONS.get(player.getUUID()) == session) cancelInternal(player);
+                player.sendSystemMessage(Component.literal(success).withStyle(ChatFormatting.GREEN));
+            } else player.sendSystemMessage(Component.literal("Could not save selection: "
+                    + ClockworkBossTemplateTasks.reason(failure)).withStyle(ChatFormatting.RED));
+        });
+        if (!queued) {
+            session.busy = false;
+            player.sendSystemMessage(Component.literal("Template file worker is busy or stopping; try again shortly.").withStyle(ChatFormatting.RED));
         }
     }
 
@@ -473,7 +455,7 @@ public final class ClockworkBossSelector {
      */
     private static void cycleMode(ServerPlayer player) {
         SelectionSession session = SESSIONS.get(player.getUUID());
-        if (session == null) {
+        if (session == null || session.busy) {
             return;
         }
 
@@ -637,21 +619,14 @@ public final class ClockworkBossSelector {
             return true;
         }
 
-        // A selector issued while the player was an operator must stop editing
-        // templates immediately if those permissions are later revoked.
-        if (!(player instanceof ServerPlayer serverPlayer)
-                || !serverPlayer.createCommandSourceStack().permissions()
-                        .hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
-            if (player instanceof ServerPlayer formerOperator) cancelInternal(formerOperator);
-            return false;
-        }
+        if (!(player instanceof ServerPlayer serverPlayer)) return false;
 
         SelectionSession session = SESSIONS.get(player.getUUID());
-        if (session == null) {
+        if (session == null || session.busy) {
             return false;
         }
 
-        return session.sessionId().toString().equals(
+        boolean matches = session.sessionId().toString().equals(
                         tag.getStringOr(SESSION_KEY, ""))
                 && session.templateName().equals(
                         tag.getStringOr(TEMPLATE_KEY, ""))
@@ -659,6 +634,24 @@ public final class ClockworkBossSelector {
                         tag.getStringOr(TARGET_KEY, TARGET_ACTIVATION))
                 && session.mode().equals(
                         tag.getStringOr(MODE_KEY, MODE_AREA));
+        if (!matches) return false;
+
+        // Trust the stored session, not the item's editable tags, when choosing
+        // permission nodes. Recheck on interaction so no permission watcher is needed.
+        var source = serverPlayer.createCommandSourceStack();
+        if (!selectionAction(session.target()).allowed(source)
+                || session.alsoBossbar() && !Action.SELECT_ARENA.allowed(source)) {
+            cancelInternal(serverPlayer);
+            serverPlayer.sendSystemMessage(Component.literal(
+                    "Selection cancelled: you no longer have permission to edit this area.")
+                    .withStyle(ChatFormatting.RED));
+            return false;
+        }
+        return true;
+    }
+
+    private static Action selectionAction(String target) {
+        return TARGET_BOSS_BAR.equals(target) ? Action.SELECT_ARENA : Action.SELECT_ACTIVATION;
     }
 
     /**
@@ -690,9 +683,8 @@ public final class ClockworkBossSelector {
     /**
      * Reads the current activation mode already saved in the template JSON.
      */
-    private static String readTemplateMode(String templateName) {
+    private static String readTemplateMode(JsonObject config) {
         try {
-            JsonObject config = ClockworkBossTemplateStore.load(templateName);
             JsonObject activation = config.has("activation")
                     && config.get("activation").isJsonObject()
                     ? config.getAsJsonObject("activation")
@@ -796,6 +788,7 @@ public final class ClockworkBossSelector {
      * Cancels a runtime session and removes its selector arrow.
      */
     private static void cancelInternal(ServerPlayer player) {
+        OPENING.remove(player.getUUID());
         SESSIONS.remove(player.getUUID());
         removeSelectorArrow(player);
     }
@@ -840,6 +833,7 @@ public final class ClockworkBossSelector {
         private String mode;
         private BlockPos pos1;
         private String firstCornerDimension;
+        private boolean busy;
         private long lastInteractionTick = Long.MIN_VALUE;
         private BlockPos lastInteractionPos;
         private String lastInteractionType = "";

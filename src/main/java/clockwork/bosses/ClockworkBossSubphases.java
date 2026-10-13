@@ -13,12 +13,15 @@ import java.util.Map;
 public final class ClockworkBossSubphases {
     public static final int MAX_SUBPHASES = 16;
     public enum Order { SEQUENTIAL, RANDOM }
+    public static final Order DEFAULT_ORDER = Order.SEQUENTIAL;
+    public static final boolean DEFAULT_ROAR_BETWEEN = true;
     public record Attributes(double speed, double resistance, double followRange, double damage, double knockback) {}
-    public enum Type { ATTACK, RECOVERY }
-    public record Step(String key, Type type, int durationTicks, int attacks, ClockworkBossSettings.Phase behavior, Attributes attributes) {}
+    public enum Type { ATTACK, RECOVERY, ACTION }
+    public record Step(String key, Type type, int durationTicks, int attacks, ClockworkBossSettings.Phase behavior, Attributes attributes,
+                       clockwork.bosses.api.BossActionType actionType, clockwork.bosses.api.BossActionSettings actionSettings) {}
     /** Two independent ordered catalogs. Random attack order is shuffled by
      * each boss; random roar selection is an independent pick per transition. */
-    public record Sequence(Order order, List<Step> steps, boolean roarBetween, List<JsonObject> roars) {}
+    public record Sequence(Order order, List<Step> steps, boolean roarBetween, List<clockwork.bosses.api.BossActionSettings> roars) {}
     private ClockworkBossSubphases() {}
 
     /** Build bounded snapshots. Null child fields inherit their parent, never
@@ -31,14 +34,14 @@ public final class ClockworkBossSubphases {
             JsonObject children = catalog(parent, "subphases");
             JsonObject roarEntries = catalog(parent, "roars");
             Order order;
-            try { order = !parent.has("subphase_order") || parent.get("subphase_order").isJsonNull() ? Order.SEQUENTIAL
+            try { order = !parent.has("subphase_order") || parent.get("subphase_order").isJsonNull() ? DEFAULT_ORDER
                     : Order.valueOf(parent.get("subphase_order").getAsString().toUpperCase(java.util.Locale.ROOT)); }
             catch (RuntimeException invalid) { throw new IllegalArgumentException("Subphase order must be sequential or random"); }
             JsonElement interludes = parent.get("roar_between_subphases");
             if (interludes != null && !interludes.isJsonNull()
                     && (!interludes.isJsonPrimitive() || !interludes.getAsJsonPrimitive().isBoolean()))
                 throw new IllegalArgumentException("roar_between_subphases must be true or false");
-            boolean roarBetween = interludes == null || interludes.isJsonNull() || interludes.getAsBoolean();
+            boolean roarBetween = interludes == null || interludes.isJsonNull() ? DEFAULT_ROAR_BETWEEN : interludes.getAsBoolean();
             List<Step> steps = new ArrayList<>();
             for (var entry : children.entrySet()) {
                 new ClockworkBossPhase(entry.getKey()); // Same bounded safe key vocabulary.
@@ -46,11 +49,33 @@ public final class ClockworkBossSubphases {
                 JsonObject child = entry.getValue().getAsJsonObject();
                 if (child.has("minimum_health_percent") || child.has("subphases"))
                     throw new IllegalArgumentException("Subphases cannot contain health cutoffs or nested subphases");
-                Type type;
-                try { type = !child.has("type") ? Type.ATTACK : Type.valueOf(child.get("type").getAsString().toUpperCase(java.util.Locale.ROOT)); }
-                catch (RuntimeException invalid) { throw new IllegalArgumentException("Subphase type must be attack or recovery; configure roars in the separate roar list"); }
-                int duration = type == Type.RECOVERY ? integer(child, "duration_ticks", 60, 1, 12000) : 60;
-                int attacks = type == Type.ATTACK ? integer(child, "attacks_before_next", 3, 1, 1000) : 3;
+                JsonElement rawType = child.get("type");
+                if (rawType != null && (!rawType.isJsonPrimitive() || !rawType.getAsJsonPrimitive().isString()))
+                    throw new IllegalArgumentException("Action type must be a registered text ID");
+                String selected = rawType == null ? "attack" : rawType.getAsString();
+                var actionType = clockwork.bosses.api.BossActionRegistry.require(ClockworkBossActions.resolve(selected));
+                if (!ClockworkBossActions.WARDEN_CAPABILITIES.containsAll(actionType.requiredCapabilities()))
+                    throw new IllegalArgumentException("This Warden cannot perform " + actionType.id());
+                Type type = actionType.id().equals(ClockworkBossActions.RECOVERY) ? Type.RECOVERY
+                        : List.of(ClockworkBossActions.COMBAT, ClockworkBossActions.MELEE, ClockworkBossActions.SONIC).contains(actionType.id()) ? Type.ATTACK : Type.ACTION;
+                JsonElement rawSettings = child.get("action_settings");
+                if (rawSettings != null && !rawSettings.isJsonObject())
+                    throw new IllegalArgumentException("Action settings must be an object");
+                JsonObject actionInput = selected.equals("attack") || selected.equals("recovery")
+                        ? new JsonObject() : object(child, "action_settings").deepCopy();
+                // Legacy files keep their old controls. Registered core actions compile
+                // those values through exactly the same declared setting schema as addons.
+                if (selected.equals("attack") && !actionInput.has("attacks_before_next"))
+                    actionInput.addProperty("attacks_before_next", integer(child, "attacks_before_next", 3, 1, 1000));
+                if (selected.equals("recovery") && !actionInput.has("duration_ticks"))
+                    actionInput.addProperty("duration_ticks", integer(child, "duration_ticks", 60, 1, 12000));
+                var actionSettings = clockwork.bosses.api.BossActionSettings.compile(actionType.settings(), actionInput);
+                int duration = type == Type.RECOVERY ? actionSettings.integer("duration_ticks") : 60;
+                int attacks = type == Type.ATTACK ? actionSettings.integer("attacks_before_next") : 3;
+                if (actionType.id().equals(ClockworkBossActions.ROAR)) {
+                    String file = actionSettings.text("file");
+                    if (!file.isEmpty() && !ClockworkBossSoundPayload.isValidFileName(file)) throw new IllegalArgumentException("Use a lowercase OGG filename for roar");
+                }
                 JsonObject effective = new JsonObject();
                 for (var field : parent.entrySet()) if (!List.of("subphases", "roars").contains(field.getKey())) effective.add(field.getKey(), field.getValue().deepCopy());
                 for (String field : List.of("movement_speed", "knockback_resistance", "follow_range", "melee", "sonic_boom", "targeting")) {
@@ -73,16 +98,24 @@ public final class ClockworkBossSubphases {
                 Attributes attributes = new Attributes(number(effective, config, "movement_speed", .3, 0, 1),
                         number(effective, config, "knockback_resistance", 1, 0, 1), number(effective, config, "follow_range", 0, 0, 256),
                         number(melee, baseMelee, "damage", 30, 0, 1_000_000), number(melee, baseMelee, "knockback", 1.5, 0, 100));
-                steps.add(new Step(entry.getKey(), type, duration, attacks, behavior, attributes));
+                steps.add(new Step(entry.getKey(), type, duration, attacks, behavior, attributes, actionType, actionSettings));
             }
-            List<JsonObject> roars = new ArrayList<>();
+            List<clockwork.bosses.api.BossActionSettings> roars = new ArrayList<>();
+            var roarType = clockwork.bosses.api.BossActionRegistry.require(ClockworkBossActions.ROAR);
             for (var entry : roarEntries.entrySet()) {
                 new ClockworkBossPhase(entry.getKey());
                 if (!entry.getValue().isJsonObject()) throw new IllegalArgumentException("Roar settings must be objects");
                 JsonObject sound = object(config, "attacks", "roar", "sound").deepCopy();
                 overlay(sound, object(parent, "roar", "sound"));
                 overlay(sound, object(entry.getValue().getAsJsonObject(), "sound"));
-                roars.add(sound);
+                // New action declarations default to Auto. Legacy inherited roar lists
+                // with no range anywhere retain their former 32-block fallback.
+                if (!sound.has("range") || sound.get("range").isJsonNull())
+                    sound.addProperty("range", ClockworkBossSoundDistance.LEGACY_FALLBACK);
+                var roarSettings = clockwork.bosses.api.BossActionSettings.compile(roarType.settings(), sound);
+                new clockwork.bosses.api.BossRoarSound(roarSettings.text("file"), roarSettings.number("volume"),
+                        roarSettings.number("pitch"), roarSettings.number("range"));
+                roars.add(roarSettings); // Validate once before publishing; no JSON merge/parse at transitions.
             }
             if (!steps.isEmpty()) sequences.put(phase, new Sequence(order, List.copyOf(steps), roarBetween, List.copyOf(roars)));
         }

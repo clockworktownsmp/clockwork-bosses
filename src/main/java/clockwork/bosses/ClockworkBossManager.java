@@ -1,5 +1,6 @@
 package clockwork.bosses;
 
+import clockwork.bosses.ClockworkBossPermissions.Action;
 import com.google.gson.JsonObject;
 import net.minecraft.ChatFormatting;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
@@ -68,6 +69,8 @@ public final class ClockworkBossManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(ClockworkBosses.MOD_ID);
     private static final Map<UUID, ClockworkBossState> ACTIVE = new HashMap<>();
     private static final Set<UUID> FAILED_REHYDRATION = new HashSet<>();
+    private record Restoration(Warden entity, boolean noAi) {}
+    private static final Map<UUID, Restoration> RESTORING = new HashMap<>();
     private static BossWatcher bossWatcher;
     // One operator-initiated copy at a time, including across world restarts;
     // borrowing Minecraft's I/O pool must not allow an unbounded work queue.
@@ -78,7 +81,8 @@ public final class ClockworkBossManager {
 
     /** Command-thread guard prevents removing a config still referenced by a loaded encounter. */
     public static boolean usesTemplate(String name) {
-        return ACTIVE.values().stream().anyMatch(state -> state.templateName().equals(name));
+        return ACTIVE.values().stream().anyMatch(state -> state.templateName().equals(name))
+                || RESTORING.values().stream().anyMatch(pending -> name.equals(((ClockworkBossMarker) pending.entity()).clockworkBosses$getTemplate()));
     }
 
     /**
@@ -102,6 +106,7 @@ public final class ClockworkBossManager {
                 playDeathSound(warden);
                 ClockworkBossState state = ACTIVE.get(warden.getUUID());
                 if (state != null) {
+                    endEncounter(warden, state, clockwork.bosses.api.BossAction.StopReason.DIED);
                     ClockworkBossMusic.end(state.uuid());
                     releasePlayerSupport(state.uuid());
                     state.bossBar().removeAllPlayers();
@@ -127,13 +132,16 @@ public final class ClockworkBossManager {
         ClockworkBossAreaEffects.releasePlayer(playerId);
         ClockworkBossPlayerHealth.releasePlayer(playerId);
         ClockworkBossFightPotion.releasePlayer(playerId);
-        for (ClockworkBossState state : ACTIVE.values()) {
+        for (ClockworkBossState state : List.copyOf(ACTIVE.values())) {
+            if (ACTIVE.get(state.uuid()) != state) continue;
             state.darknessNextTicks().remove(playerId);
             if (!state.bossBarPlayerIds().contains(playerId)) continue;
             state.bossBar().removePlayer(player);
             Set<UUID> remaining = new HashSet<>(state.bossBarPlayerIds());
             remaining.remove(playerId);
             state.setBossBarPlayerIds(remaining);
+            clockwork.bosses.api.BossEncounterEvents.PLAYER_LEFT.invoker().onEvent(
+                    encounterSnapshot(findWardenByState(player.level().getServer(), state), state), playerId);
         }
     }
 
@@ -160,9 +168,12 @@ public final class ClockworkBossManager {
         if (entity instanceof Warden warden && isClockworkBoss(warden)) {
             ((ClockworkBossMarker) warden).clockworkBosses$clearSonicVisual();
             UUID uuid = warden.getUUID();
+            Restoration pending = RESTORING.remove(uuid);
+            if (pending != null) warden.setNoAi(pending.noAi());
             FAILED_REHYDRATION.remove(uuid);
             ClockworkBossState state = ACTIVE.remove(uuid);
             if (state != null) {
+                endEncounter(warden, state, clockwork.bosses.api.BossAction.StopReason.UNLOADED);
                 cleanupState(state);
             }
             stopWatcherIfUnused();
@@ -269,16 +280,7 @@ public final class ClockworkBossManager {
         }
 
         applyDarknessIfDue(state, level, warden, level.getGameTime());
-        if (state.roarInterlude()) { requestRoarInterlude(warden, state); return; }
-        if (state.recoverySubphase()) {
-            if (state.recoveryFinished(level.getGameTime()) && state.completeRecovery(warden.getRandom())) {
-                if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, warden.getTarget(), "recovery_finished");
-                applySubphaseAttributes(warden, state);
-            }
-            return;
-        }
-        if (ClockworkBossMelee.tick(warden, state)) return;
-        ClockworkBossSonicBoom.tick(warden, state);
+        ClockworkBossActionRuntime.tick(warden, state);
     }
 
     /**
@@ -287,23 +289,20 @@ public final class ClockworkBossManager {
      * and gold calls attention to instructions. Minecraft's sendFailure already displays errors red.
      */
     public static int createTemplate(CommandSourceStack source, String templateName) {
-        try {
-            ClockworkBossTemplateStore.create(templateName);
+        return ClockworkBossTemplateTasks.command(source, Action.CREATE, "Could not create template: ", () -> {
+            ClockworkBossTemplateStore.create(templateName); return templateName;
+        }, created -> {
             source.sendSuccess(() -> Component.literal(
                     "Created Clockwork Boss template: ").withStyle(ChatFormatting.GREEN)
                     .append(Component.literal(templateName).withStyle(ChatFormatting.AQUA))
                     .append(Component.literal("\nEdit it in config/clockwork-bosses/boss-templates/")
                             .withStyle(ChatFormatting.GOLD)), true);
-            return 1;
-        } catch (Exception e) {
-            source.sendFailure(Component.literal(
-                    "Could not create template: " + e.getMessage()));
-            return 0;
-        }
+        });
     }
 
     /** Copies config/media on native I/O workers, then reports the result once on the server thread. */
     public static int createTemplateFromPreset(CommandSourceStack source, String presetName, String templateName) {
+        if (!Action.CREATE.require(source)) return 0;
         if (!ClockworkBossTemplateNames.isValid(presetName) || !ClockworkBossTemplateNames.isValid(templateName)) {
             source.sendFailure(Component.literal("Use valid lowercase preset and template names; no spaces or capitals."));
             return 0;
@@ -350,36 +349,57 @@ public final class ClockworkBossManager {
     /** Stores this command source's block position and dimension on one template. */
     public static int setSpawn(CommandSourceStack source, String templateName) {
         BlockPos pos = BlockPos.containing(source.getPosition());
-        try {
-            JsonObject config = ClockworkBossTemplateStore.load(templateName).deepCopy();
+        String dimension = source.getLevel().dimension().identifier().toString();
+        return ClockworkBossTemplateTasks.command(source, Action.SETSPAWN, "Could not save spawn position: ", () -> {
+          ClockworkBossTemplateStore.edit(templateName, config -> {
             JsonObject spawn = new JsonObject();
             spawn.addProperty("set", true);
             spawn.addProperty("x", pos.getX());
             spawn.addProperty("y", pos.getY());
             spawn.addProperty("z", pos.getZ());
-            spawn.addProperty("dimension", source.getLevel().dimension().identifier().toString());
+            spawn.addProperty("dimension", dimension);
             config.add("spawn", spawn);
-            ClockworkBossTemplateStore.save(templateName, config);
-
+          });
+          return templateName;
+        }, saved -> {
             source.sendSuccess(() -> Component.literal(
                     "Spawn position for template \"").withStyle(ChatFormatting.GREEN)
                     .append(Component.literal(templateName).withStyle(ChatFormatting.AQUA))
                     .append(Component.literal("\" set to "
                             + pos.getX() + ", " + pos.getY() + ", " + pos.getZ()
-                            + " in " + source.getLevel().dimension().identifier())), true);
-            return 1;
-        } catch (Exception e) {
-            source.sendFailure(Component.literal(
-                    "Could not save spawn position: " + e.getMessage()));
-            return 0;
-        }
+                            + " in " + dimension)), true);
+        });
+    }
+
+    /** Player commands load on the bounded file worker, then recheck identity,
+     * permissions, loot registries and deletion before creating any entity. */
+    public static int spawnAsync(CommandSourceStack source, String templateName, String instanceName) {
+        long deletion = ClockworkBossTemplateEditor.deletionEpoch();
+        return ClockworkBossTemplateTasks.command(source, Action.SPAWN, "Could not load boss template: ",
+                () -> ClockworkBossTemplateStore.load(templateName.trim()),
+                config -> {
+                    if (deletion != ClockworkBossTemplateEditor.deletionEpoch()) {
+                        source.sendFailure(Component.literal("A template was deleted while loading. Retry the spawn command.")); return;
+                    }
+                    spawnLoaded(source, templateName, instanceName, config);
+                });
+    }
+
+    /** Synchronous compatibility helper for existing integrations/fixtures.
+     * Commands use spawnAsync; callers with preloaded data can use spawnLoaded
+     * on the server thread without doing any disk work. */
+    public static int spawn(CommandSourceStack source, String templateName, String instanceName) {
+        if (!Action.SPAWN.require(source)) return 0;
+        try { return spawnLoaded(source, templateName, instanceName, ClockworkBossTemplateStore.load(templateName.trim())); }
+        catch (Exception failure) { source.sendFailure(Component.literal("Could not load boss template: " + failure.getMessage())); return 0; }
     }
 
     /**
      * Creates a marked dormant vanilla Warden with template attributes; any failed initialization discards
      * its entity and runtime state.
      */
-    public static int spawn(CommandSourceStack source, String templateName, String instanceName) {
+    public static int spawnLoaded(CommandSourceStack source, String templateName, String instanceName, JsonObject config) {
+        if (!Action.SPAWN.require(source)) return 0;
         if (ClockworkBossTemplateEditor.isDeleting(templateName)) {
             source.sendFailure(Component.literal("This template is being deleted."));
             return 0;
@@ -398,9 +418,7 @@ public final class ClockworkBossManager {
             return 0;
         }
 
-        final JsonObject config;
         try {
-            config = ClockworkBossTemplateStore.load(templateName);
             ClockworkBossLoot.validate(source.getServer(), config);
         } catch (Exception e) {
             source.sendFailure(Component.literal(
@@ -509,6 +527,7 @@ public final class ClockworkBossManager {
 
     /** Manually activates a dormant Clockwork Boss. */
     public static int activate(CommandSourceStack source, String instanceName) {
+        if (!Action.ACTIVATE.require(source)) return 0;
         ClockworkBossState state = findStateByName(source.getServer(), instanceName);
         if (state == null) {
             source.sendFailure(Component.literal(
@@ -541,6 +560,7 @@ public final class ClockworkBossManager {
      * resources.
      */
     public static int remove(CommandSourceStack source, String instanceName) {
+        if (!Action.REMOVE.require(source)) return 0;
         ClockworkBossState state = findStateByName(source.getServer(), instanceName);
         Warden warden = state == null
                 ? findLoadedWardenByName(source.getServer(), instanceName)
@@ -566,6 +586,11 @@ public final class ClockworkBossManager {
             cleanupState(state);
             ACTIVE.remove(state.uuid());
         }
+        // A marked loaded entity can lack runtime state after a failed load.
+        // Release its grants by UUID anyway; copied bottles without a remaining
+        // grant are cleaned once, including players outside the old arena.
+        releasePlayerSupport(uuid);
+        ClockworkBossFightPotion.clearOrphanedBottles(source.getServer());
         stopWatcherIfUnused();
 
         source.sendSuccess(() -> Component.literal(
@@ -580,6 +605,7 @@ public final class ClockworkBossManager {
      * unloaded chunks to load.
      */
     public static int removeAll(CommandSourceStack source) {
+        if (!Action.REMOVE_ALL.require(source)) return 0;
         Set<UUID> removedIds = new HashSet<>();
         for (ServerLevel level : source.getServer().getAllLevels()) {
             List<Entity> loadedEntities = new ArrayList<>();
@@ -608,6 +634,7 @@ public final class ClockworkBossManager {
 
     /** Lists loaded encounter states and current health without changing entity AI or loading more chunks. */
     public static int listActive(CommandSourceStack source) {
+        if (!Action.LIST.require(source)) return 0;
         rehydrate(source.getServer());
         if (ACTIVE.isEmpty()) {
             source.sendSuccess(() -> Component.literal("No active Clockwork Bosses.").withStyle(ChatFormatting.GRAY), false);
@@ -636,6 +663,7 @@ public final class ClockworkBossManager {
      * autocomplete.
      */
     public static int listTemplates(CommandSourceStack source) {
+        if (!Action.TEMPLATE_LIST.require(source)) return 0;
         try {
             var templates = ClockworkBossTemplateStore.list();
             if (templates.isEmpty()) {
@@ -660,40 +688,71 @@ public final class ClockworkBossManager {
      * Reloads each used template once, reapplies loaded boss settings, and invalidates server media caches
      * for connected trackers.
      */
+    private record ReloadFiles(Map<String, JsonObject> templates, Map<String, String> failures) {}
+
+    /** Capture used names on Minecraft's thread; the worker scans suggestions
+     * and reads each document once. Apply only after returning to that thread. */
+    public static int reloadAsync(CommandSourceStack source) {
+        List<String> names = ACTIVE.values().stream().map(ClockworkBossState::templateName).distinct().toList();
+        return ClockworkBossTemplateTasks.command(source, Action.RELOAD, "Could not reload templates: ",
+                () -> readReloadFiles(names), files -> applyReload(source, files));
+    }
+
+    /** Existing synchronous fixture/integration helper. Live commands and GUI
+     * use reloadAsync; this retains the old return/result contract. */
     public static int reload(CommandSourceStack source) {
+        if (!Action.RELOAD.require(source)) return 0;
+        try { return applyReload(source, readReloadFiles(ACTIVE.values().stream()
+                .map(ClockworkBossState::templateName).distinct().toList())); }
+        catch (Exception failure) { source.sendFailure(Component.literal("Could not reload templates: " + failure.getMessage())); return 0; }
+    }
+
+    private static ReloadFiles readReloadFiles(List<String> names) throws Exception {
+        ClockworkBossTemplateStore.refreshCache();
+        Map<String, JsonObject> templates = new HashMap<>(); Map<String, String> failures = new HashMap<>();
+        for (String name : names) {
+            try { templates.put(name, ClockworkBossTemplateStore.load(name)); }
+            catch (Exception failure) { failures.put(name, ClockworkBossTemplateTasks.reason(failure)); }
+        }
+        return new ReloadFiles(Map.copyOf(templates), Map.copyOf(failures));
+    }
+
+    /** Native-only application owns registry checks, media invalidation and
+     * encounter interruption. Failed documents keep the previous fight config. */
+    private static int applyReload(CommandSourceStack source, ReloadFiles files) {
+        if (!Action.RELOAD.require(source)) return 0;
         ClockworkBossMusic.reload(source.getServer());
         ClockworkBossSkinNetwork.refreshFileCache();
         ClockworkBossSoundNetwork.refreshFileCache();
         FAILED_REHYDRATION.clear();
-        try {
-            ClockworkBossTemplateStore.refreshCache();
-        } catch (Exception e) {
-            source.sendFailure(Component.literal(
-                    "Could not refresh Clockwork Boss template cache: " + e.getMessage()));
-        }
         rehydrate(source.getServer());
 
         int updated = 0;
         // Bosses using one template share this read-only snapshot during reload;
         // ten instances of the same boss do not cause ten disk parses.
-        Map<String, JsonObject> templates = new HashMap<>();
+        Set<String> validated = new HashSet<>();
         for (ClockworkBossState state : List.copyOf(ACTIVE.values())) {
             if (ACTIVE.get(state.uuid()) != state) continue;
             try {
-                JsonObject config = templates.get(state.templateName());
+                JsonObject config = files.templates().get(state.templateName());
                 if (config == null) {
-                    config = ClockworkBossTemplateStore.load(state.templateName());
-                    ClockworkBossLoot.validate(source.getServer(), config);
-                    templates.put(state.templateName(), config);
+                    String error = files.failures().get(state.templateName());
+                    if (error != null) source.sendFailure(Component.literal("Could not reload template \""
+                            + state.templateName() + "\": " + error));
+                    continue;
                 }
-                state.setConfig(config);
+                if (!validated.contains(state.templateName())) {
+                    ClockworkBossLoot.validate(source.getServer(), config);
+                    validated.add(state.templateName());
+                }
+                if (!state.setConfig(config) || ACTIVE.get(state.uuid()) != state) continue;
                 ClockworkBossSoundNetwork.prepareTemplate(state.templateName(), config);
                 Warden warden = findWardenByState(source.getServer(), state);
                 if (warden != null) {
                     configureSkin((ClockworkBossMarker) (Object) warden, config);
                     ClockworkBossSkinNetwork.refreshTrackedSkin(warden);
                     applyBaseAttributes(warden, config, false);
-                    state.setCurrentPhase(null);
+                    if (!state.setCurrentPhase(null) || ACTIVE.get(state.uuid()) != state) continue;
                     applyPhaseIfChanged(state, warden);
                     ensureBossBarConfiguration(state);
                     updateBossBar(source.getServer(), state, warden);
@@ -746,11 +805,67 @@ public final class ClockworkBossManager {
         if (!isClockworkBoss(warden) || !(warden.level() instanceof ServerLevel)) return null;
         ClockworkBossState state = registerIfNeeded(warden);
         if (state == null) return null;
+        if (state.actionsStopping()) return null; // No native combat during outgoing restoration.
         applyPhaseIfChanged(state, warden);
         if (state.dormant() || state.emerging() || !warden.isAlive()) return null;
-        if (state.roarInterlude()) { requestRoarInterlude(warden, state); return null; }
-        if (state.recoverySubphase()) return null;
+        // An initially dormant or rehydrated boss may already have its parent
+        // phase while no action exists. Commit its first child's attributes as
+        // well as selecting the action before native combat can read damage.
+        if (state.actionRuntime() == null) applySubphaseAttributes(warden, state);
+        else ClockworkBossActionRuntime.ensure(warden, state);
+        if (ACTIVE.get(state.uuid()) != state || state.encounterEnded() || warden.isRemoved()) return null;
+        if (isRoarAction(state)) { requestRoarInterlude(warden, state); return null; }
+        if (state.actionRuntime() == null || state.actionRuntime().pausesNativeBehaviors()) return null;
         return state.combatSettings();
+    }
+
+    /** Read-only public event data is built at transitions, not every AI tick. */
+    public static clockwork.bosses.api.BossEncounterSnapshot encounterSnapshot(Warden boss, ClockworkBossState state) {
+        var step = state.subphase();
+        return new clockwork.bosses.api.BossEncounterSnapshot(state.uuid(), state.templateName(), state.name(),
+                state.dimension().identifier().toString(), state.currentPhase() == null ? "" : state.currentPhase().key(),
+                step == null ? "" : step.key(), boss != null ? boss.level().getGameTime()
+                : state.actionRuntime() == null ? 0 : state.actionRuntime().lastGameTime(), state.bossBarPlayerIds());
+    }
+    /** Native mob hooks ask the current action for permission; phase/cooldown
+     * gates remain authoritative and ordinary Wardens never enter this path. */
+    public static boolean allowsNativeAttack(Warden boss, net.minecraft.resources.Identifier attack) {
+        var state = stateFor(boss);
+        return state != null && state.actionRuntime() != null && state.actionRuntime().allows(attack);
+    }
+    private static boolean isRoarAction(ClockworkBossState state) {
+        var runtime = state.actionRuntime();
+        return runtime != null && runtime.ownsRoar();
+    }
+    /** Actions complete through one generation-checked transition. A suspended
+     * or replaced action cannot finish a later phase on behalf of its old owner. */
+    static void onActionCompleted(Warden boss, ClockworkBossState state, long generation) {
+        if (stateFor(boss) != state || !boss.isAlive() || boss.isRemoved() || state.dormant() || state.emerging()
+                || generation != state.subphaseGeneration()) return;
+        if (state.roarInterlude()) { if (!state.advanceSubphase(boss.getRandom())) return; }
+        else if (!state.completeAction(boss.getRandom())) return;
+        applySubphaseAttributes(boss, state);
+    }
+    /** Native damage has already been accepted. Failed swings and cancelled
+     * charges never emit ATTACK_LANDED; callbacks cannot grant a second hit. */
+    public static void onAttackLanded(Warden boss, net.minecraft.world.entity.LivingEntity target,
+                                      net.minecraft.resources.Identifier attack, float damage) {
+        var state = stateFor(boss);
+        if (state != null) clockwork.bosses.api.BossEncounterEvents.ATTACK_LANDED.invoker().onEvent(
+                encounterSnapshot(boss, state), attack, target.getUUID(), Float.isFinite(damage) ? Math.max(0, damage) : 0);
+    }
+    private static void endEncounter(Warden boss, ClockworkBossState state, clockwork.bosses.api.BossAction.StopReason reason) {
+        if (!state.claimEncounterEnd()) return;
+        var snapshot = encounterSnapshot(boss, state);
+        if (state.actionRuntime() != null) state.actionRuntime().stop(reason);
+        var departing = state.bossBarPlayerIds();
+        state.setBossBarPlayerIds(Set.of());
+        state.bossBar().removeAllPlayers();
+        ClockworkBossMusic.end(state.uuid());
+        releasePlayerSupport(state.uuid());
+        var departureSnapshot = encounterSnapshot(boss, state);
+        for (var player : departing) clockwork.bosses.api.BossEncounterEvents.PLAYER_LEFT.invoker().onEvent(departureSnapshot, player);
+        clockwork.bosses.api.BossEncounterEvents.ENDED.invoker().onEvent(snapshot, reason);
     }
 
     /** Completed swings/beams choose another opponent; rejected attempts and cancelled charges do not. */
@@ -760,7 +875,7 @@ public final class ClockworkBossManager {
     }
     public static void onAttackCompleted(Warden warden, Entity attacked, long generation) {
         ClockworkBossState state = stateFor(warden);
-        if (state == null) return;
+        if (state == null || generation != state.subphaseGeneration() || !warden.isAlive() || warden.isRemoved()) return;
         if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, attacked, "melee_completed", "captured_generation", generation);
         ClockworkBossTargets.afterAttack(warden, state, attacked);
         completeSubphaseAttack(warden, state, generation);
@@ -775,7 +890,7 @@ public final class ClockworkBossManager {
     }
     public static void onRangedAttackCompleted(Warden warden, Entity attacked, ClockworkBossSettings.SonicBoom shot, long generation) {
         ClockworkBossState state = stateFor(warden);
-        if (state == null) return;
+        if (state == null || generation != state.subphaseGeneration() || !warden.isAlive() || warden.isRemoved()) return;
         if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, attacked, "sonic_completed", "captured_generation", generation);
         ClockworkBossTargets.afterAttack(warden, state, attacked, shot);
         completeSubphaseAttack(warden, state, generation);
@@ -791,8 +906,9 @@ public final class ClockworkBossManager {
 
     /** Request Minecraft's existing ROAR activity, retaining its own target,
      * navigation stop, pose, memory expiry and normal 84-tick completion. */
-    private static void requestRoarInterlude(Warden boss, ClockworkBossState state) {
-        if (!state.roarInterlude() || state.dormant() || state.emerging()) return;
+    static void requestRoarInterlude(Warden boss, ClockworkBossState state) {
+        if (!isRoarAction(state) || state.dormant() || state.emerging()) return;
+        if (state.actionRuntime().nativeRoarFinished()) return;
         var brain = boss.getBrain();
         if (boss.hasPose(net.minecraft.world.entity.Pose.ROARING) || brain.hasMemoryValue(MemoryModuleType.ROAR_TARGET)) return;
         var marker = (ClockworkBossMarker) boss;
@@ -810,12 +926,14 @@ public final class ClockworkBossManager {
     /** Native start/stop hooks carry a generation token instead of retaining an entity/state. */
     public static long roarInterludeToken(Warden boss) {
         var state = stateFor(boss);
-        return state != null && !state.dormant() && !state.emerging() && state.roarInterlude() ? state.subphaseGeneration() : -1;
+        return state != null && !state.dormant() && !state.emerging() && isRoarAction(state) ? state.subphaseGeneration() : -1;
     }
     public static boolean playRoarInterludeSound(Warden boss) {
         var state = stateFor(boss);
-        if (state == null || !state.roarInterlude()) return false;
-        JsonObject sound = state.roarInterludeSound();
+        if (state == null || !isRoarAction(state)) return false;
+        JsonObject sound = new JsonObject(); var settings = state.actionRuntime().roarSound();
+        sound.addProperty("file", settings.file()); sound.addProperty("volume", settings.volume());
+        sound.addProperty("pitch", settings.pitch()); sound.addProperty("range", settings.range());
         String file = string(sound, "file", "");
         if (file.isBlank()) return false; // Blank keeps Minecraft's normal roar sound.
         playConfiguredSound(boss, sound);
@@ -823,8 +941,8 @@ public final class ClockworkBossManager {
     }
     public static void onRoarInterludeCompleted(Warden boss, long generation) {
         var state = stateFor(boss);
-        if (generation < 0 || state == null || generation != state.subphaseGeneration() || !state.roarInterlude() || !boss.isAlive()) return;
-        state.advanceSubphase(boss.getRandom()); applySubphaseAttributes(boss, state);
+        if (generation < 0 || state == null || generation != state.subphaseGeneration() || !isRoarAction(state) || !boss.isAlive()) return;
+        state.actionRuntime().finishRoar();
     }
 
     /** Briefly retain a valid opponent during ordinary native/mod target changes.
@@ -835,7 +953,7 @@ public final class ClockworkBossManager {
         if (state == null || state.dormant() || state.emerging() || state.currentPhase() == null
                 || current == null || requested == null || current.getUUID().equals(requested.getUUID())
                 || !current.isAlive() || current.isRemoved() || !boss.canTargetEntity(current) || current.level() != boss.level()
-                || current instanceof ServerPlayer player && player.hasDisconnected()) return false;
+                || current instanceof ServerPlayer player && (player.hasDisconnected() || !isPlayerInArena(state.uuid(), player))) return false;
         var phase = state.combatSettings();
         double rawRange = boss.getAttributeValue(Attributes.FOLLOW_RANGE);
         double range = Double.isNaN(rawRange) ? 0 : Math.clamp(rawRange, 0, 256);
@@ -872,7 +990,7 @@ public final class ClockworkBossManager {
         // Reserve the boss while its file loads. Completion is a one-time
         // server task; it releases the gate on failure or sets the real duration.
         state.reserveVoiceFile();
-        ClockworkBossSoundNetwork.playVoiceLine(warden, voice.volume(), voice.pitch(), voice.range(), duration -> {
+        ClockworkBossSoundNetwork.playVoiceLine(warden, voice.volume(), voice.pitch(), soundDistance(warden, voice.range()), duration -> {
             if (stateFor(warden) != state) return;
             if (duration > 0) state.beginVoiceLine(System.nanoTime(), duration);
             else state.endVoiceLine();
@@ -905,20 +1023,60 @@ public final class ClockworkBossManager {
         ClockworkBossState existing = ACTIVE.get(uuid);
         if (existing != null) return existing;
         if (FAILED_REHYDRATION.contains(uuid)) return null;
+        if (RESTORING.containsKey(uuid)) return null;
 
         ClockworkBossMarker marker = (ClockworkBossMarker) (Object) warden;
+        var burrowCheckpoint = marker.clockworkBosses$getBurrowCheckpoint();
+        if (burrowCheckpoint != null) burrowCheckpoint.restore(warden);
         String name = marker.clockworkBosses$getName();
         String template = marker.clockworkBosses$getTemplate();
         if (name == null || name.isBlank() || template == null || template.isBlank()) {
             return null;
         }
 
+        // A loaded saved boss waits quietly for its bounded disk read. Retain
+        // only one request per UUID and restore its prior AI flag on completion
+        // or unload. No tick retries, folder scans or JSON parsing happen here.
+        var request = new Restoration(warden, warden.isNoAi());
+        RESTORING.put(uuid, request); warden.setNoAi(true);
+        boolean queued = ClockworkBossTemplateTasks.submit(warden.level().getServer(),
+                () -> ClockworkBossTemplateStore.load(template), (config, failure) -> {
+                    if (!RESTORING.remove(uuid, request)) return;
+                    warden.setNoAi(request.noAi());
+                    if (warden.isRemoved() || !isClockworkBoss(warden)
+                            || !template.equals(marker.clockworkBosses$getTemplate())
+                            || !name.equals(marker.clockworkBosses$getName())) return;
+                    if (failure != null) {
+                        FAILED_REHYDRATION.add(uuid);
+                        LOGGER.error("Could not restore saved Clockwork Boss '{}' from template '{}': {}", name, template,
+                                ClockworkBossTemplateTasks.reason(failure)); return;
+                    }
+                    ClockworkBossState restored = restoreLoaded(warden, config);
+                    if (restored != null) applyPhaseIfChanged(restored, warden);
+                });
+        if (!queued) {
+            RESTORING.remove(uuid, request); warden.setNoAi(request.noAi());
+            FAILED_REHYDRATION.add(uuid);
+            LOGGER.warn("Saved Clockwork Boss '{}' is waiting for a busy/stopping file worker; use /boss reload to retry.", name);
+        }
+        return null;
+    }
+
+    /** Completes restoration only on the native thread, using a parsed worker
+     * snapshot. Permission-free restore does not start a new encounter or heal
+     * players; it reconnects the persisted boss with existing lifecycle rules. */
+    private static ClockworkBossState restoreLoaded(Warden warden, JsonObject config) {
+        UUID uuid = warden.getUUID();
+        if (ACTIVE.containsKey(uuid)) return ACTIVE.get(uuid);
+        ClockworkBossMarker marker = (ClockworkBossMarker) warden;
+        String name = marker.clockworkBosses$getName(), template = marker.clockworkBosses$getTemplate();
+
         try {
-            JsonObject config = ClockworkBossTemplateStore.load(template);
             ClockworkBossLoot.validate(warden.level().getServer(), config);
             // Eye alignment belongs to the template, not old entity NBT; restore it on every chunk load/restart.
             marker.clockworkBosses$setEyes(ClockworkBossEyes.read(config).packed());
             marker.clockworkBosses$setBrows(ClockworkBossBrows.read(config).packed());
+            marker.clockworkBosses$setPupils(ClockworkBossPupils.read(config).packed());
             if (marker.clockworkBosses$getSkinType().isBlank()) {
                 // Older saved Wardens have no skin type metadata; initialize it from their template.
                 configureSkin(marker, config);
@@ -992,6 +1150,7 @@ public final class ClockworkBossManager {
     private static void configureSkin(ClockworkBossMarker marker, JsonObject config) {
         marker.clockworkBosses$setEyes(ClockworkBossEyes.read(config).packed());
         marker.clockworkBosses$setBrows(ClockworkBossBrows.read(config).packed());
+        marker.clockworkBosses$setPupils(ClockworkBossPupils.read(config).packed());
         JsonObject skin = object(config, "skin");
         String type = string(skin, "type", "").trim().toLowerCase(java.util.Locale.ROOT);
 
@@ -1163,11 +1322,16 @@ public final class ClockworkBossManager {
         state.setPreviousRedstonePowered(false);
         state.clearDarknessSchedule();
 
+        // Notify activation before membership. A listener can remove this boss
+        // synchronously; then no support grants or sounds should follow it.
+        clockwork.bosses.api.BossEncounterEvents.STARTED.invoker().onEvent(encounterSnapshot(warden, state));
+        if (ACTIVE.get(state.uuid()) != state || warden.isRemoved() || !warden.isAlive()) return;
         // The boss bar is now eligible to appear inside its selected visibility box.
         updateBossBar(level.getServer(), state, warden);
         // Every trigger (command, area entry or redstone) converges here.
         // Play once at the visible emergence point, after clearing dormancy.
-        playConfiguredSound(warden, state.config(), "spawn");
+        if (ACTIVE.get(state.uuid()) == state && !warden.isRemoved() && warden.isAlive())
+            playConfiguredSound(warden, state.config(), "spawn");
     }
 
     /** Ends the emergence lock and hands control back to the normal Warden AI. */
@@ -1217,14 +1381,23 @@ public final class ClockworkBossManager {
     static AABB visibilityQuery(ClockworkBossState state, Warden warden) {
         var areas = state.areas();
         if (areas.visibilityDimension() != null && !areas.visibilityDimension().equals(warden.level().dimension())) return null;
-        if (areas.visibilityUsesRadius()) return warden.getBoundingBox().inflate(areas.visibilityRadius());
+        if (areas.visibilityUsesRadius()) return warden.getBoundingBox()
+                .move(arenaAnchor(warden).subtract(warden.position())).inflate(areas.visibilityRadius());
         return areas.visibilityDimension() == null ? null : areas.visibilityBox();
     }
 
     /** Filter the broad query box to a real 3D sphere, using squared distances and no square roots. */
     static boolean insideVisibilityRadius(ClockworkBossState state, Warden warden, ServerPlayer player) {
         double radius = state.areas().visibilityRadius();
-        return !state.areas().visibilityUsesRadius() || player.distanceToSqr(warden) <= radius * radius;
+        return !state.areas().visibilityUsesRadius() || player.position().distanceToSqr(arenaAnchor(warden)) <= radius * radius;
+    }
+
+    /** Burial moves the entity down temporarily. Anchor membership at its saved
+     * surface so that the vertical move cannot remove buffs, music or eligible
+     * targets from a radius arena. Emergence commits the new surface to this journal. */
+    private static net.minecraft.world.phys.Vec3 arenaAnchor(Warden boss) {
+        var checkpoint = ((ClockworkBossMarker) boss).clockworkBosses$getBurrowCheckpoint();
+        return checkpoint == null ? boss.position() : checkpoint.origin();
     }
 
     /** Input-time guard reuses compiled geometry and loaded entity lookup. It
@@ -1259,7 +1432,9 @@ public final class ClockworkBossManager {
     public static boolean isRecovering(Warden boss) {
         if (!isClockworkBoss(boss)) return false;
         var state = stateFor(boss);
-        return state != null && !state.dormant() && !state.emerging() && state.recoverySubphase();
+        return state != null && !state.dormant() && !state.emerging()
+                && (state.actionsStopping() || (state.actionRuntime() != null
+                ? state.actionRuntime().pausesNativeBehaviors() : state.recoverySubphase()));
     }
 
     /** Parsing a registry key does not resolve/load its dimension; unknown worlds simply cannot match. */
@@ -1388,7 +1563,15 @@ public final class ClockworkBossManager {
             }
         }
 
+        if (ACTIVE.get(state.uuid()) != state || warden.isRemoved()) return;
         state.setBossBarPlayerIds(desired);
+        var snapshot = encounterSnapshot(warden, state);
+        for (var uuid : current) if (!desired.contains(uuid))
+            clockwork.bosses.api.BossEncounterEvents.PLAYER_LEFT.invoker().onEvent(snapshot, uuid);
+        for (var uuid : desired) {
+            if (ACTIVE.get(state.uuid()) != state || warden.isRemoved()) return;
+            if (!current.contains(uuid)) clockwork.bosses.api.BossEncounterEvents.PLAYER_JOINED.invoker().onEvent(snapshot, uuid);
+        }
     }
 
     /**
@@ -1425,14 +1608,13 @@ public final class ClockworkBossManager {
 
         ClockworkBossPhase previousPhase = state.currentPhase();
 
-        applyPhaseAttributes(warden, state, phase);
-        state.clearDarknessSchedule();
         // Release an old wind-up before the phase setter clears its UUID. This
         // keeps cancellation observable and clears its visual at the same event.
         ClockworkBossMelee.cancel(warden, state);
-        state.setCurrentPhase(phase);
+        if (!state.setCurrentPhase(phase) || ACTIVE.get(state.uuid()) != state || !warden.isAlive() || warden.isRemoved()) return;
+        applyPhaseAttributes(warden, state, phase);
+        state.clearDarknessSchedule();
         if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, warden.getTarget(), "health_phase_changed", "boss_hp", warden.getHealth(), "boss_max_hp", warden.getMaxHealth());
-        applySubphaseAttributes(warden, state);
         if (state.dormant()) positionDormantWarden(state, warden);
         state.bossBar().setName(
                 Component.literal(state.name() + " — " + phase.name())
@@ -1443,7 +1625,13 @@ public final class ClockworkBossManager {
         applyEffectVisuals(warden, state, phase, previousPhase != null);
         if (previousPhase != null) {
             playPhaseChangeSound(warden, state.config(), phase);
+            clockwork.bosses.api.BossEncounterEvents.PHASE_CHANGED.invoker().onEvent(
+                    encounterSnapshot(warden, state), previousPhase.key(), phase.key());
         }
+        // Start the next action after phase identity/visuals are committed and
+        // listeners have observed them. Reentrant callbacks may remove/replace it.
+        if (ACTIVE.get(state.uuid()) == state && phase.equals(state.currentPhase()) && !warden.isRemoved())
+            applySubphaseAttributes(warden, state);
     }
 
     /** Plays the configured death sound once, before Minecraft removes the entity. */
@@ -1495,8 +1683,18 @@ public final class ClockworkBossManager {
             return;
         }
         double pitch = clamp(number(settings, "pitch", 1.0), 0.5, 2.0);
-        double range = clamp(number(settings, "range", 32.0), 1.0, 128.0);
-        ClockworkBossSoundNetwork.play(warden, fileName, (float) volume, (float) pitch, (float) range);
+        float range = soundDistance(warden, number(settings, "range", ClockworkBossSoundDistance.LEGACY_FALLBACK));
+        ClockworkBossSoundNetwork.play(warden, fileName, (float) volume, (float) pitch, range);
+    }
+
+    /** Events, custom/action roars and voices resolve Auto before asynchronous media work.
+     * An arena in another dimension cannot define this emitter's audience. Manual values survive. */
+    private static float soundDistance(Warden warden, double configured) {
+        ClockworkBossState state = stateFor(warden);
+        var areas = state == null ? null : state.areas();
+        if (areas != null && areas.visibilityDimension() != null
+                && !areas.visibilityDimension().equals(warden.level().dimension())) areas = null;
+        return ClockworkBossSoundDistance.resolve(configured, areas);
     }
 
     /**
@@ -1659,24 +1857,24 @@ public final class ClockworkBossManager {
      * change scale/bar identity/aura/glow, emit phase effects or reset cooldowns. */
     private static void applySubphaseAttributes(Warden boss, ClockworkBossState state) {
         state.initializeSubphase(boss.getRandom());
+        if (!state.dormant() && !state.emerging()) ClockworkBossActionRuntime.ensure(boss, state);
+        if (ACTIVE.get(state.uuid()) != state || state.encounterEnded() || boss.isRemoved()) return;
         var step = state.subphase();
         if (step == null) return;
         if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(boss, boss.getTarget(), "subphase_enter",
                 "type", step.type().name(), "duration_ticks", step.durationTicks(), "attack_budget", step.attacks());
+    }
+
+    /** The controller commits selected child attributes before calling start(),
+     * so core and addon actions observe the same configured native mob values. */
+    static void applySubphaseAttributeValues(Warden boss, ClockworkBossState state) {
+        if (ACTIVE.get(state.uuid()) != state || state.encounterEnded() || boss.isRemoved()) return;
+        var step = state.subphase();
+        if (step == null) return;
         // An interlude keeps the outgoing child's attributes until the native
         // roar finishes. Cancel unfinished beams before waiting for recovery.
         if (state.roarInterlude()) { ClockworkBossSonicBoom.cancelCharge(boss, state); return; }
-        if (state.recoverySubphase()) {
-            state.beginRecovery(boss.level().getGameTime());
-            ClockworkBossSonicBoom.cancelCharge(boss, state);
-            ClockworkBossMelee.cancel(boss, state);
-            // Finish native behaviors once, instead of resuming an unfinished
-            // roar/swing after the timed pause. Native stop owns pose cleanup.
-            boss.getBrain().stopAll((ServerLevel) boss.level(), boss);
-            boss.getNavigation().stop();
-            boss.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
-            return;
-        }
+        if (state.recoverySubphase()) return; // Registered recovery owns the pause/deadline.
         var values = step.attributes(); var attributes = boss.getAttributes();
         set(attributes, Attributes.MOVEMENT_SPEED, values.speed());
         set(attributes, Attributes.KNOCKBACK_RESISTANCE, values.resistance());
@@ -1959,6 +2157,8 @@ public final class ClockworkBossManager {
      * encounter.
      */
     private static void cleanupState(ClockworkBossState state) {
+        endEncounter(null, state, clockwork.bosses.api.BossAction.StopReason.REMOVED);
+        state.setActionRuntime(null);
         ClockworkBossMusic.end(state.uuid());
         // Native unload/removal already calls this cleanup. Keep only voice
         // catalogs still needed by another instance of the same template.
@@ -1979,8 +2179,12 @@ public final class ClockworkBossManager {
      * Minecraft's world saves.
      */
     private static void clearAll() {
+        for (Restoration pending : RESTORING.values()) pending.entity().setNoAi(pending.noAi());
+        RESTORING.clear();
         ClockworkBossAnnouncements.clear();
         for (ClockworkBossState state : List.copyOf(ACTIVE.values())) {
+            var runtime = state.actionRuntime();
+            endEncounter(runtime == null || runtime.closed() ? null : runtime.boss(), state, clockwork.bosses.api.BossAction.StopReason.SERVER_STOPPED);
             cleanupState(state);
         }
         ACTIVE.clear();

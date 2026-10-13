@@ -24,6 +24,68 @@ import java.util.UUID;
 public class ClockworkBossCombatGameTests {
     private static UUID protectedVictim;
     private static boolean protectionRegistered;
+    private static UUID preventedDeath;
+    private static boolean deathProtectionRegistered;
+
+    /** Chase movement can temporarily separate a boss and its opponent. The
+     * captured swing must keep its deadline, then use their positions at impact. */
+    @GameTest(maxTicks = 25, setupTicks = 10)
+    public void melee_movement_keeps_windup_deadline(GameTestHelper helper) throws Exception {
+        JsonObject config = config(1000);
+        for (var phase : ClockworkBossPhase.values()) {
+            var melee = phase(config, phase).getAsJsonObject("melee");
+            melee.addProperty("charge_time_ticks", 10);
+            melee.addProperty("damage", 7);
+            melee.addProperty("knockback", 0);
+            phase(config, phase).getAsJsonObject("sonic_boom").addProperty("enabled", false);
+        }
+        Warden boss = boss(helper, config, "moving_melee");
+        boss.setNoGravity(true);
+        var victim = helper.spawn(EntityTypes.COW, new Vec3(3, 2, 2));
+        victim.setNoAi(true); victim.setNoGravity(true);
+        victim.getAttribute(Attributes.MAX_HEALTH).setBaseValue(100);
+        victim.setHealth(100); victim.setInvulnerableTime(0);
+        boss.setAttackTarget(victim);
+        var state = ClockworkBossManager.stateFor(boss);
+        boss.doHurtTarget(helper.getLevel(), victim);
+        var pending = state.pendingMelee();
+        helper.assertTrue(pending != null, "moving melee captures its initial deadline");
+        helper.runAfterDelay(1, () -> {
+            boss.snapTo(helper.absoluteVec(new Vec3(2, 2, 6)));
+            helper.assertTrue(!boss.isWithinMeleeAttackRange(victim), "boss movement temporarily leaves melee reach");
+            ClockworkBossMelee.tick(boss, state);
+            helper.assertTrue(state.pendingMelee() == pending && victim.getHealth() == 100,
+                    "boss movement must not cancel or restart the wind-up");
+        });
+        helper.runAfterDelay(3, () -> {
+            victim.snapTo(helper.absoluteVec(new Vec3(6, 2, 2)));
+            ClockworkBossMelee.tick(boss, state);
+            helper.assertTrue(state.pendingMelee() == pending && victim.getHealth() == 100,
+                    "opponent movement keeps the same deadline without early damage");
+        });
+        helper.runAfterDelay(8, () -> {
+            boss.snapTo(helper.absoluteVec(new Vec3(2, 2, 2)));
+            victim.snapTo(helper.absoluteVec(new Vec3(3, 2, 2)));
+            // Expire Minecraft's per-tick sensing cache after changing positions.
+            boss.getSensing().tick();
+            ClockworkBossMelee.tick(boss, state);
+            helper.assertTrue(state.pendingMelee() == pending && victim.getHealth() == 100,
+                    "back in reach, still waiting for the original deadline");
+        });
+        helper.runAfterDelay(10, () -> {
+            try {
+                ClockworkBossMelee.tick(boss, state);
+                helper.assertTrue(state.pendingMelee() == null && victim.getHealth() == 93,
+                        "moving swing lands once at its original deadline: hp=" + victim.getHealth()
+                                + " pending=" + state.pendingMelee() + " now=" + helper.getLevel().getGameTime()
+                                + " due=" + pending.dueTick() + " reach=" + boss.isWithinMeleeAttackRange(victim)
+                                + " visible=" + boss.getSensing().hasLineOfSight(victim) + " " + diagnostics(boss));
+                ClockworkBossMelee.tick(boss, state);
+                helper.assertTrue(victim.getHealth() == 93, "completed swing cannot deal a duplicate hit");
+                helper.succeed();
+            } finally { boss.discard(); victim.discard(); }
+        });
+    }
 
     /** A Fabric damage veto stands in for an external protection mod; this
      * proves our beam respects rejection, not actual Combat Roll integration. */
@@ -72,8 +134,8 @@ public class ClockworkBossCombatGameTests {
         } finally { protectedVictim = null; ClockworkBossDiagnostics.clear(); boss.discard(); victim.discard(); }
     }
 
-    /** Moving out during wind-up (as a roll might) cancels a pending native hit.
-     * Crossing a health phase also invalidates its captured generation. */
+    /** Moving out during wind-up keeps its timer. Crossing a health phase still
+     * invalidates the captured generation immediately, even before impact. */
     @GameTest public void compatibility_delayed_melee_range_and_phase(GameTestHelper helper) throws Exception {
         JsonObject config = config(1000);
         for (var phase : ClockworkBossPhase.values()) {
@@ -88,19 +150,115 @@ public class ClockworkBossCombatGameTests {
         var state = ClockworkBossManager.stateFor(boss);
         try {
             helper.assertTrue(!boss.doHurtTarget(helper.getLevel(), victim) && state.pendingMelee() != null, "native wind-up schedules without immediate damage");
+            var pending = state.pendingMelee();
             float health = victim.getHealth();
-            victim.snapTo(boss.position().add(50, 0, 0));
+            // Stay in loaded test chunks: unloading a target is still a valid
+            // immediate interruption, distinct from briefly leaving melee reach.
+            victim.snapTo(boss.position().add(0, 0, 4));
             ClockworkBossMelee.tick(boss, state);
-            helper.assertTrue(state.pendingMelee() == null && victim.getHealth() == health, "out-of-range victim cancels pending hit");
+            helper.assertTrue(state.pendingMelee() == pending && victim.getHealth() == health, "temporary separation preserves pending hit without damage");
             victim.snapTo(boss.position().add(1, 0, 0));
             boss.setAttackTarget(victim);
             boss.doHurtTarget(helper.getLevel(), victim);
-            helper.assertTrue(state.pendingMelee() != null, "next wind-up starts normally");
+            helper.assertTrue(state.pendingMelee() == pending, "another native attempt cannot reset the original wind-up");
             boss.setHealth(499);
             ClockworkBossManager.prepareCombatPhase(boss);
             helper.assertTrue(state.pendingMelee() == null && victim.getHealth() == health, "new health phase cancels an old pending hit");
             helper.succeed();
         } finally { boss.discard(); victim.discard(); }
+    }
+
+    /** Completing a wind-up does not guarantee damage: an opponent outside
+     * native melee reach at impact dodges, without receiving a late hit on return. */
+    @GameTest(maxTicks = 25, setupTicks = 10)
+    public void melee_escape_at_impact_cannot_land_later(GameTestHelper helper) throws Exception {
+        JsonObject config = config(1000);
+        for (var phase : ClockworkBossPhase.values()) {
+            phase(config, phase).getAsJsonObject("melee").addProperty("charge_time_ticks", 10);
+            phase(config, phase).getAsJsonObject("sonic_boom").addProperty("enabled", false);
+        }
+        Warden boss = boss(helper, config, "melee_escape");
+        boss.setNoGravity(true);
+        var victim = helper.spawn(EntityTypes.COW, new Vec3(3, 2, 2));
+        victim.setNoAi(true); victim.setNoGravity(true);
+        boss.setAttackTarget(victim);
+        var state = ClockworkBossManager.stateFor(boss);
+        boss.doHurtTarget(helper.getLevel(), victim);
+        var pending = state.pendingMelee();
+        float health = victim.getHealth();
+        victim.snapTo(boss.position().add(10, 0, 0));
+        helper.runAfterDelay(9, () -> {
+            ClockworkBossMelee.tick(boss, state);
+            helper.assertTrue(state.pendingMelee() == pending && victim.getHealth() == health,
+                    "escaped opponent keeps the original wind-up through its last tick");
+        });
+        helper.runAfterDelay(10, () -> {
+            try {
+                ClockworkBossMelee.tick(boss, state);
+                helper.assertTrue(state.pendingMelee() == null && victim.getHealth() == health,
+                        "outside reach at impact receives no damage and releases the pending hit");
+                victim.snapTo(boss.position().add(1, 0, 0));
+                boss.getSensing().tick();
+                ClockworkBossMelee.tick(boss, state);
+                helper.assertTrue(victim.getHealth() == health, "returning cannot revive the missed swing");
+                helper.succeed();
+            } finally { boss.discard(); victim.discard(); }
+        });
+    }
+
+    /** A wall can interrupt visibility without resetting the timer, but native
+     * visibility must still reject damage when that wall remains at impact. */
+    @GameTest(maxTicks = 25, setupTicks = 10)
+    public void melee_wall_at_impact_and_target_interruption(GameTestHelper helper) throws Exception {
+        JsonObject config = config(1000);
+        config.getAsJsonObject("targeting").addProperty("min_target_ticks", 0);
+        for (var phase : ClockworkBossPhase.values()) {
+            phase(config, phase).getAsJsonObject("melee").addProperty("charge_time_ticks", 10);
+            phase(config, phase).getAsJsonObject("sonic_boom").addProperty("enabled", false);
+        }
+        Warden boss = boss(helper, config, "melee_wall");
+        boss.setNoGravity(true);
+        // Enlarge native reach enough for a full solid block between the actors;
+        // neither actor's eye is inside the wall. Do not bypass the reach method.
+        boss.getAttribute(Attributes.SCALE).setBaseValue(4);
+        // This assertion runs before the next entity tick refreshes dirty
+        // attributes, so explicitly refresh native dimensions in the fixture.
+        boss.refreshDimensions();
+        var victim = helper.spawn(EntityTypes.COW, new Vec3(4.8, 2, 2));
+        victim.setNoAi(true); victim.setNoGravity(true);
+        boss.setAttackTarget(victim);
+        var state = ClockworkBossManager.stateFor(boss);
+        boss.doHurtTarget(helper.getLevel(), victim);
+        helper.assertTrue(state.pendingMelee() != null, "initial wind-up exists before target clearing");
+        boss.setAttackTarget(null);
+        helper.assertTrue(state.pendingMelee() == null, "lost target cancels immediately despite deferred reach checks");
+        boss.setAttackTarget(victim);
+        boss.doHurtTarget(helper.getLevel(), victim);
+        var pending = state.pendingMelee();
+        float health = victim.getHealth();
+        var wall = boss.blockPosition().offset(1, 0, 0);
+        for (int y = 0; y < 12; y++) helper.getLevel().setBlockAndUpdate(wall.above(y), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+        boss.getSensing().tick();
+        helper.assertTrue(boss.isWithinMeleeAttackRange(victim) && !boss.getSensing().hasLineOfSight(victim),
+                "fixture obstructs visibility while retaining native melee reach: reach="
+                        + boss.isWithinMeleeAttackRange(victim) + " visible=" + boss.getSensing().hasLineOfSight(victim));
+        helper.runAfterDelay(9, () -> {
+            ClockworkBossMelee.tick(boss, state);
+            helper.assertTrue(state.pendingMelee() == pending && victim.getHealth() == health,
+                    "temporary loss of visibility does not restart wind-up or cause early damage");
+        });
+        helper.runAfterDelay(10, () -> {
+            try {
+                ClockworkBossMelee.tick(boss, state);
+                helper.assertTrue(state.pendingMelee() == null && victim.getHealth() == health,
+                        "wall at impact rejects damage and releases pending state");
+                for (int y = 0; y < 12; y++) helper.getLevel().setBlockAndUpdate(wall.above(y), net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+                boss.getSensing().tick();
+                ClockworkBossMelee.tick(boss, state);
+                helper.assertTrue(victim.getHealth() == health, "removing the wall cannot revive the missed swing");
+                helper.succeed();
+            } finally { boss.discard(); victim.discard(); }
+        });
     }
 
     /** Native Brain probes exercise the exact calls Lithium optimizes. Recovery
@@ -504,6 +662,249 @@ public class ClockworkBossCombatGameTests {
         return sameContents(normalized, second);
     }
 
+    /** Exercise the real remove command, including bottles moved out of the
+     * offhand and overlapping grants. Removal must release only its encounter;
+     * the final encounter restores the personal offhand and removes all copies. */
+    @GameTest(maxTicks = 20, setupTicks = 60)
+    public void remove_command_cleans_fight_potion(GameTestHelper helper) throws Exception {
+        var fixture = new PlayerFixture(helper, helper.absoluteVec(new Vec3(1, 2, 1)));
+        var player = fixture.player;
+        Warden first = boss(helper, ClockworkBossTemplateDocument.defaults(), "potion_remove_a");
+        Warden second = boss(helper, ClockworkBossTemplateDocument.defaults(), "potion_remove_b");
+        var policy = new ClockworkBossPlayerSupport.Potion(true, 20, 300, 20, 20);
+        var original = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.PAPER, 7);
+        try {
+            player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
+            ClockworkBossFightPotion.enter(first.getUUID(), player, policy);
+            ClockworkBossFightPotion.enter(second.getUUID(), player, policy);
+            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "grant placed a fight potion in offhand");
+            helper.assertTrue(ClockworkBossManager.remove(source(helper), ((ClockworkBossMarker) first).clockworkBosses$getName()) == 1,
+                    "first remove command succeeds");
+            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "another encounter retains its potion grant");
+            var orphan = player.getOffhandItem().copy();
+            player.getInventory().setItem(1, player.getOffhandItem().copy());
+            player.containerMenu.setCarried(player.getOffhandItem().copy());
+            int updatesBefore = fixture.listener.fullInventoryUpdates;
+            helper.assertTrue(ClockworkBossManager.remove(source(helper), ((ClockworkBossMarker) second).clockworkBosses$getName()) == 1,
+                    "final remove command succeeds");
+            helper.assertTrue(sameTransferredContents(player.getOffhandItem(), original), "final removal restores personal offhand contents");
+            helper.assertTrue(player.containerMenu.getCarried().isEmpty(), "final removal clears cursor bottle");
+            helper.assertTrue(fixture.listener.fullInventoryUpdates > updatesBefore, "removal sends authoritative full inventory for stale client caches");
+            for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++)
+                helper.assertTrue(!ClockworkBossFightPotion.isPotion(player.getInventory().getItem(slot)), "final removal clears marked inventory bottles");
+            // A creative copy or restored inventory can reintroduce a bottle
+            // after its membership ends. A later explicit removal must clear it
+            // without altering the player's unrelated personal items.
+            player.getInventory().setItem(2, player.getOffhandItem());
+            player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, orphan);
+            Warden third = boss(helper, ClockworkBossTemplateDocument.defaults(), "potion_remove_orphan");
+            try {
+                helper.assertTrue(ClockworkBossManager.remove(source(helper), ((ClockworkBossMarker) third).clockworkBosses$getName()) == 1, "orphan cleanup command succeeds");
+                helper.assertTrue(player.getOffhandItem().isEmpty() && sameTransferredContents(player.getInventory().getItem(2), original), "orphan bottle removed; personal item preserved");
+            } finally { third.discard(); }
+            helper.succeed();
+        } finally {
+            ClockworkBossFightPotion.releaseBoss(first.getUUID());
+            ClockworkBossFightPotion.releaseBoss(second.getUUID());
+            first.discard(); second.discard(); fixture.close();
+        }
+    }
+
+    /** Reproduce death -> grave -> encounter removal -> respawn -> reclaim.
+     * The supplied Universal Graves jar is optional: inspect/reclaim through its
+     * public API only in this development fixture, never in the release mod.
+     * Without it, exercise the same native death path and ordinary item drops. */
+    @GameTest(maxTicks = 20, setupTicks = 60)
+    public void potion_death_before_grave_and_late_reclaim(GameTestHelper helper) throws Exception {
+        var fixture = new PlayerFixture(helper, helper.absoluteVec(new Vec3(1, 2, 1)));
+        fixture.acknowledgeLoaded();
+        var player = fixture.player;
+        Warden boss = boss(helper, ClockworkBossTemplateDocument.defaults(), "potion_grave");
+        var original = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.PAPER, 7);
+        original.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME,
+                net.minecraft.network.chat.Component.literal("grave_test_personal_offhand"));
+        var ordinary = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.POTION);
+        ordinary.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME,
+                net.minecraft.network.chat.Component.literal("grave_test_ordinary_potion"));
+        Runnable cleanup = () -> { ClockworkBossFightPotion.releaseBoss(boss.getUUID()); boss.discard(); fixture.close(); };
+        var rules = helper.getLevel().getGameRules();
+        boolean keep = rules.get(net.minecraft.world.level.gamerules.GameRules.KEEP_INVENTORY);
+        try {
+            player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
+            player.getInventory().setItem(9, ordinary.copy());
+            ClockworkBossFightPotion.enter(boss.getUUID(), player, new ClockworkBossPlayerSupport.Potion(true, 20, 300, 20, 20));
+            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "death fixture starts with fight bottle");
+            player.getInventory().setItem(1, player.getOffhandItem().copy());
+            player.containerMenu.setCarried(player.getOffhandItem().copy());
+            // Native respawn must stay in the loaded fixture chunk. A remote
+            // world spawn starts unrelated chunk generation just before this
+            // short-lived GameTest server shuts down; it is not needed to test
+            // COPY_FROM or recovering a grave after the encounter has ended.
+            player.setRespawnPosition(new net.minecraft.server.level.ServerPlayer.RespawnConfig(
+                    net.minecraft.world.level.storage.LevelData.RespawnData.of(helper.getLevel().dimension(),
+                            helper.absolutePos(new net.minecraft.core.BlockPos(6, 2, 6)), 0, 0), true), false);
+            player.setInvulnerableTime(0); player.damageCooldownTime = 0;
+            rules.set(net.minecraft.world.level.gamerules.GameRules.KEEP_INVENTORY, false, helper.getLevel().getServer());
+            player.hurtServer(helper.getLevel(), player.damageSources().generic(), 1000);
+            helper.assertTrue(!player.isAlive(), "native fatal damage commits death");
+        } catch (Throwable failure) { cleanup.run(); throw failure; }
+        finally { rules.set(net.minecraft.world.level.gamerules.GameRules.KEEP_INVENTORY, keep, helper.getLevel().getServer()); }
+        // Graves places its captured inventory through a scheduled server task.
+        // Wait for that test-only boundary; gameplay adds no timer or polling.
+        helper.runAfterDelay(2, () -> {
+            Object grave = null;
+            try {
+                boolean graves = net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("universal-graves");
+                if (graves) {
+                    var captured = (java.util.Collection<?>) Class.forName("eu.pb4.graves.GravesApi")
+                            .getMethod("getGravesOf", UUID.class).invoke(null, player.getUUID());
+                    helper.assertTrue(captured.size() == 1, "Universal Graves captured one actual grave");
+                    grave = captured.iterator().next();
+                    var contents = (java.util.List<?>) grave.getClass().getMethod("getItems").invoke(grave);
+                    int paper = 0, potions = 0;
+                    for (Object entry : contents) {
+                        var stack = (net.minecraft.world.item.ItemStack) entry.getClass().getMethod("stack").invoke(entry);
+                        helper.assertTrue(!ClockworkBossFightPotion.isPotion(stack), "actual grave never captures a temporary fight bottle");
+                        if (net.minecraft.world.item.ItemStack.isSameItemSameComponents(stack, original)) paper += stack.getCount();
+                        if (net.minecraft.world.item.ItemStack.isSameItemSameComponents(stack, ordinary)) potions += stack.getCount();
+                    }
+                    helper.assertTrue(paper == 7 && potions == 1, "grave preserves personal items and ordinary potions exactly once");
+                }
+                helper.assertTrue(ClockworkBossManager.remove(source(helper), ((ClockworkBossMarker) boss).clockworkBosses$getName()) == 1,
+                        "encounter ends before player reclaims their items");
+                var restored = fixture.respawn();
+                helper.assertTrue(restored.level() == helper.getLevel()
+                        && restored.distanceToSqr(helper.absoluteVec(new Vec3(6, 2, 6))) < 9,
+                        "native respawn uses the separate loaded checkpoint, not the occupied grave position");
+                restored.snapTo(helper.absoluteVec(new Vec3(1, 2, 1)));
+                if (grave != null) {
+                    grave.getClass().getMethod("quickEquip", net.minecraft.server.level.ServerPlayer.class).invoke(grave, restored);
+                    helper.assertTrue(sameTransferredContents(restored.getOffhandItem(), original), "grave restores personal offhand to its original slot");
+                } else {
+                    for (var drop : helper.getLevel().getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
+                            restored.getBoundingBox().inflate(4))) {
+                        drop.setNoPickUpDelay(); drop.playerTouch(restored);
+                    }
+                }
+                int paper = 0, potions = 0;
+                for (int slot = 0; slot < restored.getInventory().getContainerSize(); slot++) {
+                    var stack = restored.getInventory().getItem(slot);
+                    helper.assertTrue(!ClockworkBossFightPotion.isPotion(stack), "late reclaim leaves no fight potion after encounter end");
+                    if (net.minecraft.world.item.ItemStack.isSameItemSameComponents(stack, original)) paper += stack.getCount();
+                    if (net.minecraft.world.item.ItemStack.isSameItemSameComponents(stack, ordinary)) potions += stack.getCount();
+                }
+                helper.assertTrue(paper == 7 && potions == 1, "late reclaim preserves all personal items without duplicates");
+                helper.succeed();
+            } catch (ReflectiveOperationException failure) {
+                throw new IllegalStateException("Could not exercise the supplied Universal Graves API", failure);
+            } finally {
+                // The fixture owns this grave as well as its fake player. Do
+                // not leave a retained empty grave in the disposable pack run
+                // when its server setting keeps monuments after item recovery.
+                try {
+                    if (grave != null && !(Boolean) grave.getClass().getMethod("isRemoved").invoke(grave))
+                        grave.getClass().getMethod("destroyGrave", net.minecraft.server.MinecraftServer.class,
+                                net.minecraft.world.entity.player.Player.class).invoke(grave, helper.getLevel().getServer(), fixture.player);
+                } catch (ReflectiveOperationException failure) {
+                    throw new IllegalStateException("Could not clean up the test grave", failure);
+                } finally { cleanup.run(); }
+            }
+        });
+    }
+
+    /** Old graves/container copies may already hold a marked potion. The first
+     * attempted use outside membership removes it/copies from this player's
+     * inventory only, with a full native refresh and no ordinary potion loss. */
+    @GameTest(setupTicks = 60)
+    public void potion_old_grave_copy_cleans_on_use(GameTestHelper helper) {
+        var fixture = new PlayerFixture(helper, helper.absoluteVec(new Vec3(1, 2, 1)));
+        var player = fixture.player;
+        UUID grant = UUID.randomUUID();
+        var original = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.PAPER, 7);
+        try {
+            player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
+            ClockworkBossFightPotion.enter(grant, player, new ClockworkBossPlayerSupport.Potion(true, 20, 300, 20, 20));
+            var saved = player.getOffhandItem().copy();
+            ClockworkBossFightPotion.releaseBoss(grant);
+            player.getInventory().setItem(2, player.getOffhandItem());
+            player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, saved.copy());
+            player.getInventory().setItem(1, saved.copy());
+            player.containerMenu.setCarried(saved.copy());
+            player.getInventory().setItem(9, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.POTION));
+            int updates = fixture.listener.fullInventoryUpdates;
+            var result = net.fabricmc.fabric.api.event.player.UseItemCallback.EVENT.invoker()
+                    .interact(player, helper.getLevel(), net.minecraft.world.InteractionHand.OFF_HAND);
+            helper.assertTrue(result == net.minecraft.world.InteractionResult.FAIL, "old bottle cannot be used after grant ends");
+            helper.assertTrue(player.getOffhandItem().isEmpty() && player.containerMenu.getCarried().isEmpty()
+                    && player.getInventory().getItem(1).isEmpty(), "attempted use clears old bottle and all held copies");
+            helper.assertTrue(sameTransferredContents(player.getInventory().getItem(2), original)
+                    && player.getInventory().getItem(9).is(net.minecraft.world.item.Items.POTION), "orphan cleanup preserves personal items and normal potions");
+            helper.assertTrue(fixture.listener.fullInventoryUpdates > updates, "old bottle removal sends authoritative inventory state");
+            helper.succeed();
+        } finally { ClockworkBossFightPotion.releaseBoss(grant); fixture.close(); }
+    }
+
+    /** Canceled fatal damage and a successful vanilla totem are not deaths.
+     * Removing a bottle during ALLOW_DEATH would break both of these paths. */
+    @GameTest(setupTicks = 60)
+    public void potion_survives_cancelled_death_and_totem(GameTestHelper helper) {
+        var fixture = new PlayerFixture(helper, helper.absoluteVec(new Vec3(1, 2, 1)));
+        fixture.acknowledgeLoaded();
+        var player = fixture.player;
+        UUID grant = UUID.randomUUID();
+        if (!deathProtectionRegistered) {
+            deathProtectionRegistered = true;
+            net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+                if (!entity.getUUID().equals(preventedDeath)) return true;
+                entity.setHealth(1); return false;
+            });
+        }
+        try {
+            ClockworkBossFightPotion.enter(grant, player, new ClockworkBossPlayerSupport.Potion(true, 20, 300, 20, 20));
+            preventedDeath = player.getUUID();
+            player.setInvulnerableTime(0); player.damageCooldownTime = 0;
+            player.hurtServer(helper.getLevel(), player.damageSources().generic(), 1000);
+            helper.assertTrue(player.getHealth() == 1 && player.isAlive() && ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "a death veto retains the fight potion");
+            preventedDeath = null;
+            player.setHealth(20); player.setInvulnerableTime(0); player.damageCooldownTime = 0;
+            player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND,
+                    new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.TOTEM_OF_UNDYING));
+            player.hurtServer(helper.getLevel(), player.damageSources().generic(), 1000);
+            helper.assertTrue(player.getHealth() < 20 && player.isAlive() && ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "native totem survival retains the fight potion");
+            helper.succeed();
+        } finally { preventedDeath = null; ClockworkBossFightPotion.releaseBoss(grant); fixture.close(); }
+    }
+
+    /** keepInventory still ends this player's grant on real death, without
+     * losing their own offhand item or touching an unmarked vanilla potion. */
+    @GameTest(setupTicks = 60)
+    public void potion_death_with_keep_inventory(GameTestHelper helper) {
+        var fixture = new PlayerFixture(helper, helper.absoluteVec(new Vec3(1, 2, 1)));
+        fixture.acknowledgeLoaded();
+        var player = fixture.player;
+        UUID grant = UUID.randomUUID();
+        var rules = helper.getLevel().getGameRules();
+        boolean keep = rules.get(net.minecraft.world.level.gamerules.GameRules.KEEP_INVENTORY);
+        var original = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.PAPER, 7);
+        try {
+            player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
+            player.getInventory().setItem(9, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.POTION));
+            ClockworkBossFightPotion.enter(grant, player, new ClockworkBossPlayerSupport.Potion(true, 20, 300, 20, 20));
+            player.setInvulnerableTime(0); player.damageCooldownTime = 0;
+            rules.set(net.minecraft.world.level.gamerules.GameRules.KEEP_INVENTORY, true, helper.getLevel().getServer());
+            player.hurtServer(helper.getLevel(), player.damageSources().generic(), 1000);
+            helper.assertTrue(!player.isAlive() && sameTransferredContents(player.getOffhandItem(), original), "committed death restores personal offhand with keepInventory");
+            helper.assertTrue(player.getInventory().getItem(9).is(net.minecraft.world.item.Items.POTION)
+                    && !ClockworkBossFightPotion.isPotion(player.getInventory().getItem(9)), "ordinary potion is retained");
+            for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++)
+                helper.assertTrue(!ClockworkBossFightPotion.isPotion(player.getInventory().getItem(slot)), "keepInventory retains no fight bottle");
+            helper.succeed();
+        } finally {
+            rules.set(net.minecraft.world.level.gamerules.GameRules.KEEP_INVENTORY, keep, helper.getLevel().getServer());
+            ClockworkBossFightPotion.releaseBoss(grant); fixture.close();
+        }
+    }
+
     /** Copies preserve ownership, but changed/moved items and a newly occupied
      * offhand must not be overwritten. Transfers remove the live source stack. */
     @GameTest(setupTicks = 60) public void potion_copied_inventory_ownership(GameTestHelper helper) {
@@ -576,7 +977,7 @@ public class ClockworkBossCombatGameTests {
     }
 
     static final class PlayerFixture implements AutoCloseable {
-        final net.minecraft.server.level.ServerPlayer player;
+        net.minecraft.server.level.ServerPlayer player;
         final RecordingListener listener;
         final io.netty.channel.embedded.EmbeddedChannel channel;
         PlayerFixture(GameTestHelper helper, Vec3 position) {
@@ -630,16 +1031,31 @@ public class ClockworkBossCombatGameTests {
                 throw new IllegalStateException("Could not preload LuckPerms for the embedded test player", failure);
             }
         }
+        /** Native respawn replaces the server entity and fires COPY_FROM;
+         * close must subsequently release the replacement, not the dead entity. */
+        net.minecraft.server.level.ServerPlayer respawn() {
+            player = player.level().getServer().getPlayerList().respawn(player, false, net.minecraft.world.entity.Entity.RemovalReason.KILLED);
+            acknowledgeLoaded();
+            return player;
+        }
+        /** An embedded connection has no client to acknowledge the 26.3 world
+         * load. The real native handler unlocks damage; setting HP alone would
+         * otherwise test a player whose fatal damage is silently rejected. */
+        void acknowledgeLoaded() {
+            player.connection.handleAcceptPlayerLoad(new net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket());
+        }
         @Override public void close() { player.level().getServer().getPlayerList().remove(player); channel.finishAndReleaseAll(); }
     }
     private static final class RecordingListener extends net.minecraft.server.network.ServerGamePacketListenerImpl {
         final java.util.List<String> titles = new java.util.ArrayList<>();
+        int fullInventoryUpdates;
         RecordingListener(net.minecraft.server.MinecraftServer server, net.minecraft.network.Connection connection,
                           net.minecraft.server.level.ServerPlayer player) {
             super(server, connection, player, net.minecraft.server.network.CommonListenerCookie.createInitial(player.getGameProfile(), false));
         }
         @Override public void send(net.minecraft.network.protocol.Packet<?> packet) {
             if (titles != null && packet instanceof net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket title) titles.add(title.text().getString());
+            if (packet instanceof net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket) fullInventoryUpdates++;
         }
     }
     @GameTest public void health_presets_and_native_scope(GameTestHelper helper) throws Exception {
@@ -795,17 +1211,22 @@ public class ClockworkBossCombatGameTests {
                     + " target=" + boss.getTarget() + " eligible=" + boss.canTargetEntity(target));
             boss.setHealth(1500);
             ClockworkBossManager.prepareCombatPhase(boss);
+            helper.assertTrue(state.sonicCharge() == null && target.getHealth() == 200,
+                    "phase change interrupts the old action without landing its beam");
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(state.sonicCharge() == original, "phase crossing preserves original telegraph");
-            // Make the captured charge due without adding 20 test-world ticks.
-            // The definition is still exactly the captured attack, not the new phase.
-            state.startSonicCharge(target.getUUID(), helper.getLevel().getGameTime() - 20,
-                    new ClockworkBossSettings.Phase(false, 40, original.settings(), state.settings().phase(state.currentPhase()).darkness(), state.settings().phase(state.currentPhase()).targeting()));
+            var replacement = state.sonicCharge();
+            helper.assertTrue(replacement != null && replacement != original && replacement.settings().damage() == 8,
+                    "new phase starts its own beam with new settings");
+            // The uninterrupted replacement retains its complete start-time
+            // definition. Synthetic time avoids waiting forty world ticks here;
+            // the next test separately proves the real replacement deadline.
+            state.startSonicCharge(target.getUUID(), helper.getLevel().getGameTime() - 40,
+                    new ClockworkBossSettings.Phase(false, 40, replacement.settings(), state.settings().phase(state.currentPhase()).darkness(), state.settings().phase(state.currentPhase()).targeting()));
             float before = target.getHealth();
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(before - target.getHealth() == 6 && state.sonicCharge() == null, "old charge uses old damage once");
+            helper.assertTrue(before - target.getHealth() == 8 && state.sonicCharge() == null, "replacement charge lands its captured damage once");
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(target.getHealth() == before - 6, "no duplicate beam");
+            helper.assertTrue(target.getHealth() == before - 8, "no duplicate beam");
             boss.getBrain().eraseMemory(MemoryModuleType.SONIC_BOOM_COOLDOWN);
             ClockworkBossSonicBoom.tick(boss, state);
             ClockworkBossSonicCharge enraged = state.sonicCharge();
@@ -813,21 +1234,18 @@ public class ClockworkBossCombatGameTests {
                     "subsequent beam uses new definition");
             boss.heal(1500);
             ClockworkBossManager.prepareCombatPhase(boss);
-            helper.assertTrue(state.sonicCharge() == enraged, "healing backward preserves in-flight beam");
+            helper.assertTrue(state.sonicCharge() == null, "healing into a previous phase also interrupts the action");
+            ClockworkBossSonicBoom.tick(boss, state);
+            helper.assertTrue(state.sonicCharge() != null, "previous phase can start a fresh charge");
             for (ClockworkBossPhase phase : ClockworkBossPhase.values()) phase(config, phase).getAsJsonObject("sonic_boom").addProperty("enabled", false);
             ClockworkBossTemplateStore.save("regression_sonic", config);
             helper.assertTrue(ClockworkBossManager.reload(source(helper)) == 1, "reload while charging");
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(state.sonicCharge() == enraged && enraged.settings().enabled(), "reload disabling keeps existing attack");
-            state.startSonicCharge(target.getUUID(), helper.getLevel().getGameTime() - 40,
-                    new ClockworkBossSettings.Phase(false, 40, enraged.settings(), state.settings().phase(state.currentPhase()).darkness(), state.settings().phase(state.currentPhase()).targeting()));
-            // This second synthetic deadline fires in the same test tick as
-            // the first. Clear only the target's native hurt cooldown; real
-            // elapsed deadlines are independently covered by the timed test.
-            target.damageCooldownTime = 0;
+            helper.assertTrue(state.sonicCharge() == null && ((ClockworkBossMarker) boss).clockworkBosses$getSonicVisual().isEmpty(),
+                    "reload interrupts pending damage and clears its visual");
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(target.getHealth() == before - 14 && state.sonicCharge() == null,
-                    "in-flight old beam still fires with old damage after disabling reload");
+            helper.assertTrue(target.getHealth() == before - 8 && state.sonicCharge() == null,
+                    "disabled reload cannot land the interrupted beam");
             boss.getBrain().eraseMemory(MemoryModuleType.SONIC_BOOM_COOLDOWN);
             ClockworkBossSonicBoom.tick(boss, state);
             helper.assertTrue(state.sonicCharge() == null, "disabled next beam stays disabled");
@@ -835,8 +1253,9 @@ public class ClockworkBossCombatGameTests {
         helper.succeed();
     }
 
-    /** Real elapsed ticks prove the telegraph deadline is neither shortened nor restarted by a phase change. */
-    @GameTest(maxTicks = 60) public void sonic_real_deadline_and_target_switch(GameTestHelper helper) throws Exception {
+    /** Real elapsed ticks prove an API interruption cancels the old deadline,
+     * and the next action receives its full wind-up. No combat code is replaced. */
+    @GameTest(maxTicks = 80) public void sonic_real_deadline_and_target_switch(GameTestHelper helper) throws Exception {
         JsonObject config = config(3000);
         // Isolate cancellation after an actual assignment from the deliberate target hold policy.
         config.getAsJsonObject("targeting").addProperty("min_target_ticks", 0);
@@ -869,22 +1288,32 @@ public class ClockworkBossCombatGameTests {
         var state = ClockworkBossManager.stateFor(boss);
         ClockworkBossSonicBoom.tick(boss, state);
         var original = state.sonicCharge();
+        var replacement = new ClockworkBossSonicCharge[1];
         helper.assertTrue(original != null, "timed charge starts");
         helper.runAfterDelay(10, () -> {
             boss.setHealth(1500);
             ClockworkBossManager.prepareCombatPhase(boss);
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(state.sonicCharge() == original, "midcharge threshold retains deadline");
+            replacement[0] = state.sonicCharge();
+            helper.assertTrue(replacement[0] != null && replacement[0] != original, "midcharge threshold starts a distinct action charge");
         });
         helper.runAfterDelay(19, () -> {
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(target.getHealth() == 200 && state.sonicCharge() == original, "no beam one tick early");
+            helper.assertTrue(target.getHealth() == 200 && state.sonicCharge() == replacement[0], "replacement still charging before old deadline");
         });
         helper.runAfterDelay(20, () -> {
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(target.getHealth() == 194 && state.sonicCharge() == null, "old beam fires at original deadline");
+            helper.assertTrue(target.getHealth() == 200 && state.sonicCharge() == replacement[0], "interrupted beam cannot fire at its old deadline");
+        });
+        helper.runAfterDelay(49, () -> {
             ClockworkBossSonicBoom.tick(boss, state);
-            helper.assertTrue(target.getHealth() == 194 && state.sonicCharge() == null, "native cooldown prevents duplicates");
+            helper.assertTrue(target.getHealth() == 200 && state.sonicCharge() == replacement[0], "replacement cannot fire one tick early");
+        });
+        helper.runAfterDelay(50, () -> {
+            ClockworkBossSonicBoom.tick(boss, state);
+            helper.assertTrue(target.getHealth() == 192 && state.sonicCharge() == null, "replacement fires after its complete forty-tick wind-up");
+            ClockworkBossSonicBoom.tick(boss, state);
+            helper.assertTrue(target.getHealth() == 192 && state.sonicCharge() == null, "native cooldown prevents duplicates");
             boss.getBrain().eraseMemory(MemoryModuleType.SONIC_BOOM_COOLDOWN);
             ClockworkBossSonicBoom.tick(boss, state);
             helper.assertTrue(state.sonicCharge().settings().chargeTime() == 40, "next beam gets new charge delay");

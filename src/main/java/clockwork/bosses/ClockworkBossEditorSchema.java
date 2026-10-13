@@ -25,6 +25,7 @@ public final class ClockworkBossEditorSchema {
 
     /** Backfill missing settings for editing, but never invent phase entries in an existing phase map. */
     public static JsonObject editable(JsonObject stored) {
+        ClockworkBossTemplateFormat.version(stored);
         JsonObject copy = stored.deepCopy();
         copy.remove("_documentation");
         if (!copy.has("phases") || !copy.get("phases").isJsonObject()) {
@@ -36,6 +37,13 @@ public final class ClockworkBossEditorSchema {
             copy.add("phases", phases);
         }
         merge(copy, DEFAULTS, "");
+        // New files explicitly select Auto (0). Missing/null base ranges in
+        // older files mean 32 blocks; display that without changing stored data.
+        for (String path : ClockworkBossSoundDistance.BASE_RANGE_PATHS) {
+            JsonElement value = get(stored, path);
+            if (value == null || value.isJsonNull())
+                putCreating(copy, path, new JsonPrimitive(ClockworkBossSoundDistance.LEGACY_FALLBACK));
+        }
         // RC7 and older documents have no source selector: retain their datapack semantics,
         // including when an unrelated field is edited. New documents already declare entries.
         if (get(stored, "loot.source") == null) putCreating(copy, "loot.source", new JsonPrimitive("table"));
@@ -80,6 +88,7 @@ public final class ClockworkBossEditorSchema {
                 index++;
             }
         }
+        ClockworkBossActionEditor.prepare(copy);
         return copy;
     }
 
@@ -120,12 +129,13 @@ public final class ClockworkBossEditorSchema {
 
     /** Only these bounded structural operations may add/remove/reorder children.
      * Scalar save patches still cannot insert arbitrary objects or field paths. */
-    public static boolean orderField(String key) { return List.of("_phase_order", "_subphase_orders", "_roar_orders", "_loot_entry_order").contains(key); }
+    public static boolean orderField(String key) { return List.of("_phase_order", "_subphase_orders", "_roar_orders", "_loot_entry_order", ClockworkBossActionEditor.TYPES).contains(key); }
     public static void applyOrders(JsonObject root, JsonObject patch) {
         applyRewardOrder(root, patch);
         if (patch.has("_phase_order")) root.add("phases", ordered(root.getAsJsonObject("phases"), patch.get("_phase_order"), "phases"));
         applyChildOrders(root, patch, "subphases", "_subphase_orders");
         applyChildOrders(root, patch, "roars", "_roar_orders");
+        ClockworkBossActionEditor.applyTypes(root, patch);
     }
     /** Accept a list of stable reward keys, never a client-supplied arbitrary JSON subtree.
      * Existing entries (including extension fields) are copied intact; new ones use trusted defaults. */
@@ -172,7 +182,7 @@ public final class ClockworkBossEditorSchema {
     }
     /** Derive a small order patch instead of shipping an unrestricted child tree. */
     public static JsonObject orderPatch(JsonObject before, JsonObject after) {
-        JsonObject patch = new JsonObject(), children = new JsonObject(), roars = new JsonObject();
+        JsonObject patch = new JsonObject(), children = new JsonObject(), roars = new JsonObject(), actions = new JsonObject();
         var beforeEntries = get(before, "loot.entries"); var afterEntries = get(after, "loot.entries");
         if (afterEntries != null && afterEntries.isJsonObject()
                 && (beforeEntries == null || !beforeEntries.isJsonObject()
@@ -185,6 +195,12 @@ public final class ClockworkBossEditorSchema {
             var old = oldPhases.has(entry.getKey()) ? oldPhases.getAsJsonObject(entry.getKey()) : new JsonObject();
             var oldChildren = old.has("subphases") && old.get("subphases").isJsonObject() ? old.getAsJsonObject("subphases") : new JsonObject();
             var nextChildren = next.getAsJsonObject("subphases");
+            for (var child : nextChildren.entrySet()) {
+                String selected = child.getValue().getAsJsonObject().get("type").getAsString();
+                JsonObject oldChild = oldChildren.has(child.getKey()) ? oldChildren.getAsJsonObject(child.getKey()) : newSubphase();
+                String previous = oldChild.has("type") ? oldChild.get("type").getAsString() : "attack";
+                if (!previous.equals(selected)) actions.addProperty("phases." + entry.getKey() + ".subphases." + child.getKey(), selected);
+            }
             if (!oldChildren.keySet().stream().toList().equals(nextChildren.keySet().stream().toList())) children.add(entry.getKey(), keys(nextChildren));
             var oldRoars = old.has("roars") && old.get("roars").isJsonObject() ? old.getAsJsonObject("roars") : new JsonObject();
             var nextRoars = next.getAsJsonObject("roars");
@@ -192,6 +208,7 @@ public final class ClockworkBossEditorSchema {
         }
         if (!children.isEmpty()) patch.add("_subphase_orders", children);
         if (!roars.isEmpty()) patch.add("_roar_orders", roars);
+        if (!actions.isEmpty()) patch.add(ClockworkBossActionEditor.TYPES, actions);
         return patch;
     }
     private static com.google.gson.JsonArray keys(JsonObject object) {
@@ -227,16 +244,28 @@ public final class ClockworkBossEditorSchema {
         return base;
     }
 
+    /** Registered action fields use the server-supplied descriptor for this document. */
+    public static Field field(String path, JsonElement current, JsonObject document) {
+        Field action = ClockworkBossActionEditor.field(document, path, current);
+        if (action != null) return action;
+        if (path.contains(".action_settings.")) return new Field(Kind.JSON, List.of(), false, false, 0, 0,
+                "Unknown extension field is preserved; install its addon to edit declared settings.");
+        return field(path, current);
+    }
+
     /** Metadata follows stable field paths, not the order or number of displayed phases. */
     public static Field field(String path, JsonElement current) {
+        if (path.equals(ClockworkBossTemplateFormat.VERSION_FIELD))
+            return new Field(Kind.NUMBER, List.of(), false, true,
+                    ClockworkBossTemplateFormat.CURRENT_VERSION, ClockworkBossTemplateFormat.CURRENT_VERSION,
+                    "Template format revision. Written automatically; do not change it manually.");
         String base = basePath(path);
         boolean reward = path.matches("loot\\.entries\\.[^.]+\\.[^.]+");
         String key = base.substring(base.lastIndexOf('.') + 1);
         JsonElement sample = get(DEFAULTS, base);
         if (sample == null || sample.isJsonNull()) sample = current;
         boolean nullable = path.startsWith("phases.") || path.startsWith("dormant_darkness.") || current.isJsonNull();
-        if (path.matches("phases\\.[^.]+\\.subphases\\.[^.]+\\.(attacks_before_next|duration_ticks|type)")
-                || key.equals("subphase_order") || key.equals("roar_between_subphases")) nullable = false;
+        if (path.matches("phases\\.[^.]+\\.subphases\\.[^.]+\\.(attacks_before_next|duration_ticks|type)")) nullable = false;
         List<String> choices = switch (base) {
             case "loot.vanilla_drops" -> List.of("keep", "replace");
             case "skin.type" -> List.of("player", "default", "custom");
@@ -282,7 +311,7 @@ public final class ClockworkBossEditorSchema {
             case "volume" -> { min = 0; max = 4; }
             case "mob_volume" -> { min = 0; max = 1; }
             case "pitch" -> { min = 0.5; max = 2; }
-            case "range" -> { min = 1; max = 128; }
+            case "range" -> { min = ClockworkBossSoundDistance.AUTOMATIC; max = ClockworkBossSoundDistance.MAX_RANGE; }
             case "fade_out_seconds" -> { min = 0; max = 10; }
             case "minimum_health_percent" -> { min = 0; max = 100; }
             case "knockback", "knockback_horizontal", "knockback_vertical" -> { min = 0; max = 100; }
@@ -304,6 +333,10 @@ public final class ClockworkBossEditorSchema {
         String help = ClockworkBossTemplateDocument.description(path);
         if (key.equals("hunger_restored")) integer = true;
         if (base.startsWith("skin.glowing_eyebrows.")) { min = 0; max = 12; }
+        if (base.startsWith("skin.glowing_pupils.") && kind == Kind.NUMBER) {
+            integer = !key.startsWith("scale_");
+            min = integer ? -1 : 0.5; max = integer ? 7 : 8;
+        }
         if (help.isEmpty()) help = ClockworkBossTemplateDocument.description(base);
         if (reward) {
             nullable = false;
@@ -316,7 +349,32 @@ public final class ClockworkBossEditorSchema {
 
     /** Parse a draft without permissive numeric coercion; a blank inheritable input means JSON null. */
     public static JsonElement parse(String path, String text, JsonElement original) {
-        Field field = field(path, original);
+        return parse(path, text, original, null);
+    }
+    public static JsonElement parse(String path, String text, JsonElement original, JsonObject document) {
+        Field field = document == null ? field(path, original) : field(path, original, document);
+        var setting = document == null ? null : ClockworkBossActionEditor.setting(document, path);
+        if (setting != null) {
+            // API null means this setting's declared default, not a parent
+            // phase's action_settings. Match the schema and runtime compiler.
+            if (text.equals("<inherit>") || setting.kind() != clockwork.bosses.api.BossSetting.Kind.TEXT && text.isBlank())
+                return JsonNull.INSTANCE;
+            JsonPrimitive scalar = switch (setting.kind()) {
+                case TEXT -> new JsonPrimitive(text);
+                case BOOLEAN -> {
+                    if (!text.equals("true") && !text.equals("false")) throw new IllegalArgumentException("Choose true or false");
+                    yield new JsonPrimitive(Boolean.parseBoolean(text));
+                }
+                case NUMBER -> {
+                    try { yield new JsonPrimitive(ClockworkBossNumbers.decimal(text)); }
+                    catch (NumberFormatException invalid) { throw new IllegalArgumentException(field.range()); }
+                }
+            };
+            setting.parse(scalar);
+            if (setting.kind() == clockwork.bosses.api.BossSetting.Kind.TEXT)
+                ClockworkBossActionEditor.validateText(document, path, text);
+            return scalar;
+        }
         if (field.nullable && text.equals("<inherit>")) return JsonNull.INSTANCE;
         if (field.nullable && field.kind != Kind.TEXT && text.isBlank()) return JsonNull.INSTANCE;
         if (!field.choices.isEmpty() && !field.choices.contains(text)) throw new IllegalArgumentException("Choose one of " + String.join(", ", field.choices));
@@ -332,14 +390,7 @@ public final class ClockworkBossEditorSchema {
                 yield new JsonPrimitive(value);
             }
             case TEXT -> {
-                if (text.length() > (path.endsWith("announcement.text") ? 80 : 512)) throw new IllegalArgumentException("Text is too long");
-                if (path.endsWith(".file") && !text.isEmpty()) {
-                    boolean valid = path.equals("skin.file") ? CustomWardenSkinPayload.isValidFileName(text) : ClockworkBossSoundPayload.isValidFileName(text);
-                    if (!valid) throw new IllegalArgumentException("Use a lowercase filename only; no spaces or paths");
-                }
-                if (path.equals("skin.name") && !text.isEmpty() && !text.matches("[A-Za-z0-9_]{1,16}")) throw new IllegalArgumentException("Use a Minecraft username (1–16 letters, numbers or underscores)");
-                if (path.endsWith("warden_effects.color") && !text.matches("#[0-9A-Fa-f]{6}")) throw new IllegalArgumentException("Use #RRGGBB");
-                if (path.endsWith(".dimension") && !text.isEmpty() && !text.matches("[a-z0-9_.-]+:[a-z0-9/._-]+")) throw new IllegalArgumentException("Use a dimension ID such as minecraft:overworld");
+                ClockworkBossTemplateText.rule(path).validate(text);
                 if (path.equals("loot.loot_table") && !text.isEmpty()) ClockworkBossLoot.parseTable(text);
                 if (path.matches("loot\\.entries\\.[^.]+\\.item")) ClockworkBossLootEntries.parseItem(text);
                 yield new JsonPrimitive(text);
@@ -351,7 +402,9 @@ public final class ClockworkBossEditorSchema {
 
     /** Validate scalar edits while disallowing hidden field additions/removals and changed object structure. */
     public static void validate(JsonObject expected, JsonObject candidate) {
-        compare(expected, candidate, "", 0, new int[]{0});
+        ClockworkBossTemplateFormat.version(candidate);
+        compare(expected, candidate, "", 0, new int[]{0}, candidate);
+        ClockworkBossActionEditor.validate(candidate);
         ClockworkBossLoot.read(candidate); // Cross-field quantity limits apply even if each scalar is in range.
         validateAttackLimits(candidate, "targeting");
         JsonElement phases = candidate.get("phases");
@@ -384,6 +437,18 @@ public final class ClockworkBossEditorSchema {
         }
     }
 
+    /** Common labels for the in-game editor and exported schema. Special page
+     * titles can still describe a field in context without duplicating its limits. */
+    public static String label(String path) {
+        String[] words = path.substring(path.lastIndexOf('.') + 1).replace('_', ' ').replace('-', ' ').split(" ");
+        StringBuilder result = new StringBuilder();
+        for (String word : words) if (!word.isEmpty()) {
+            if (!result.isEmpty()) result.append(' ');
+            result.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+        }
+        return result.toString();
+    }
+
     /** Validate inherited attack limits together, so a valid scalar edit cannot
      * silently create a maximum below the minimum in another phase. */
     private static void validateAttackLimits(JsonObject config, String path) {
@@ -399,21 +464,25 @@ public final class ClockworkBossEditorSchema {
         return value == null || value.isJsonNull() ? fallback : value.getAsInt();
     }
 
-    private static void compare(JsonElement expected, JsonElement candidate, String path, int depth, int[] count) {
+    private static void compare(JsonElement expected, JsonElement candidate, String path, int depth, int[] count, JsonObject document) {
+        if (path.equals(ClockworkBossActionEditor.CATALOG)) {
+            if (!expected.equals(candidate)) throw new IllegalArgumentException("Action catalog is read-only");
+            return;
+        }
         if (depth > 24 || ++count[0] > 4096) throw new IllegalArgumentException("Document is too complex for this editor");
         if (expected.isJsonObject()) {
             if (!candidate.isJsonObject() || !expected.getAsJsonObject().keySet().equals(candidate.getAsJsonObject().keySet())) throw new IllegalArgumentException("Document structure changed; reopen the editor");
-            for (var entry : expected.getAsJsonObject().entrySet()) compare(entry.getValue(), candidate.getAsJsonObject().get(entry.getKey()), path.isEmpty() ? entry.getKey() : path + "." + entry.getKey(), depth + 1, count);
+            for (var entry : expected.getAsJsonObject().entrySet()) compare(entry.getValue(), candidate.getAsJsonObject().get(entry.getKey()), path.isEmpty() ? entry.getKey() : path + "." + entry.getKey(), depth + 1, count, document);
         } else if (!expected.equals(candidate)) {
             if (candidate.isJsonNull()) {
-                if (!field(path, expected).nullable) throw new IllegalArgumentException(path + ": this value cannot inherit");
+                if (!field(path, expected, document).nullable) throw new IllegalArgumentException(path + ": this value cannot inherit");
             } else {
-                Field field = field(path, expected);
+                Field field = field(path, expected, document);
                 if (!candidate.isJsonPrimitive() || field.kind == Kind.JSON) throw new IllegalArgumentException(path + ": unsupported change");
                 if (field.kind == Kind.NUMBER && !candidate.getAsJsonPrimitive().isNumber()
                         || field.kind == Kind.BOOLEAN && !candidate.getAsJsonPrimitive().isBoolean()
                         || field.kind == Kind.TEXT && !candidate.getAsJsonPrimitive().isString()) throw new IllegalArgumentException(path + ": wrong value type");
-                try { parse(path, candidate.getAsString(), expected); }
+                try { parse(path, candidate.getAsString(), expected, document); }
                 catch (IllegalArgumentException invalid) { throw new IllegalArgumentException(path + ": " + invalid.getMessage()); }
             }
         }

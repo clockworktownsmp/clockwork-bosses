@@ -17,10 +17,13 @@ public record ClockworkBossSonicCharge(UUID targetUuid, long fireTick,
         return start(target, now, phase, -1);
     }
     public static ClockworkBossSonicCharge start(UUID target, long now, ClockworkBossSettings.Phase phase, long generation) {
+        return start(target, now, phase, generation, phase.meleeEnabled());
+    }
+    public static ClockworkBossSonicCharge start(UUID target, long now, ClockworkBossSettings.Phase phase, long generation, boolean yieldsToMelee) {
         int delay = phase.sonic().chargeTime();
         // Unusual externally modified world times must not overflow into an immediate hit.
         long deadline = now > Long.MAX_VALUE - delay ? Long.MAX_VALUE : now + delay;
-        return new ClockworkBossSonicCharge(target, deadline, phase.sonic(), phase.meleeEnabled(), generation);
+        return new ClockworkBossSonicCharge(target, deadline, phase.sonic(), yieldsToMelee, generation);
     }
 
     public boolean due(long now) { return now >= fireTick; }

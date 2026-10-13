@@ -1,0 +1,2 @@
+# Optional test tooling only. No Python library is shipped with the mod.
+jsonschema==4.25.1

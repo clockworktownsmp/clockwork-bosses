@@ -1,16 +1,311 @@
 # Clockwork Bosses architecture
 
-This document describes the main code paths and why they are structured this way. The bundled strict JSON supplies one defaults/comment catalog; generated templates place that documentation in concise section blocks, with direct field notes grouped above the values.
+## Pending public action foundation
 
-## Version 0.1 numeric boundary — 2026-10-10
+[API.md](API.md) documents experimental revision 1. `clockwork.bosses.api`
+contains the startup registry, immutable setting definitions, per-execution
+action/context contracts, mob capability boundary and Fabric encounter events.
+`ClockworkBossActionRuntime` owns the action, native attack permissions and LIFO
+cleanup on the existing AI callback. Core actions are ordinary registrations;
+legacy type aliases compile through the same schemas. The editor receives
+data-only descriptors and uses bounded type-change operations with server-owned
+defaults. Virtual descriptors are excluded from disk. Temporary action entities
+receive a narrow native save veto; core burrow separately journals its return
+position/flags to recover a saved interruption. The standalone lightning addon
+imports only the public API. These changes compile and are packaged in the
+installed `0.2.beta.1` test build. They are not included in the recorded 0.1
+runtime verification; new API playtests remain pending.
 
-ClockworkBossNumbers shares bounded exact decimal parsing between the editor and
-reward definitions. Text/precision/scale checks precede potentially expensive
-formatting. Existing extreme values can display compactly without rewriting
-files; edits still require valid bounds. The editor compares BigDecimal values
-to exact field limits. Shared MAX_PATCH_BYTES keeps client/server limits aligned.
-Empty configured entry lists avoid building a table but keep the existing
-exactly-once death gate and vanilla Keep/Replace behavior.
+Burrow resolves the target when emergence starts and performs one bounded search
+of nearby loaded terrain using native collision/path classification. The saved
+surface is updated before relocation; cleanup retains that destination. Radius
+membership uses this surface while buried, preserving the existing watcher and
+support lifecycle. Burrow advances the existing sequence after emergence;
+the next action determines whether native attacks resume.
+
+This is the current 0.1 code map: where behavior lives, who owns temporary state,
+and when it is released. Admin workflows are in [the README](README.md);
+resource limits are in [the performance audit](PERFORMANCE_AUDIT.md).
+
+## Development source: administrative permissions
+
+`ClockworkBossPermissions.Action` owns immutable Fabric Permission API v1 nodes.
+The provider owns grants, groups, contexts and grant caching; unanswered nodes fall
+back to Minecraft's native game-master permission. No permission watcher is added.
+Brigadier visibility and command handlers share the catalog. Editor packets check
+their actual document kind or reload operation; selector clicks check server-owned
+session settings, including both grants for combined selection. Own-session Close
+and Cancel remain available after revocation. Accepted I/O may finish; completion
+checks release busy state before withholding unauthorized results. Existing editor
+leave/shutdown/session limits own cleanup. See [PERMISSIONS.md](PERMISSIONS.md).
+
+## Development source: compact editor layout
+
+`ClockworkBossEditorTheme` owns a small client-only set of workshop colors and
+native button/text-box styling, shared by the template and creative item pickers.
+It creates no renderer resources, tasks or world state. Native input, focus,
+narration and tooltips remain responsible for editing/accessibility.
+
+`ClockworkBossTemplateScreen.layoutRows` measures fields on input-driven rebuilds.
+Adjacent compatible fields share a row when the form is wide enough; headings,
+filenames and structured values remain full width. The measured placements drive
+both widget positions and scroll bounds. Only visible controls are created; tall
+eye/brow cross pads clip individual buttons. Short darkness explanations remain
+between the label and range. Full help is optional so it need not reserve a tall
+footer. Section-title text is cached on rebuild, not searched each render frame.
+
+Ordered phase/reward rows and drag/drop hit areas use the same compact row size.
+Resizing still cancels a pending drag and preserves draft text/caret. A stacked
+preview reserves room for the form; a wide screen retains the separate model
+panel. Existing detached-entity/texture cleanup owns preview resources. This
+changes presentation only; server validation, permissions, save patches and
+gameplay are unchanged. Common/client compilation passed and this layout is
+included in the installed `0.2.beta.1` test build. In-game GUI verification
+remains pending.
+
+## Development source: adjustable pupils
+
+`ClockworkBossPupils` normalizes eye-local offsets and nearest-pixel sizes. Its
+Auto sentinel follows the inner/bottom edge at the current eye dimensions, so
+omitted settings preserve existing scaled-eye placement. The record computes
+clipped rectangles without changing stored offsets. Manager load/configure/reload
+applies one appended native integer; marker -> render snapshot -> emissive cache
+carries it. The optional-client layout removes that slot from vanilla clients.
+
+The template screen shares a cross-pad implementation for eyes, eyebrows and
+pupils; only pupils use eye-local coordinates. Input changes invalidate the
+existing detached preview metadata. Shader masks retain the same darker 0x66
+luminance and bounded texture ownership. The website exports the common field
+definitions, preserves unknown/missing data and mirrors drawing/clipping rules.
+Compilation and website syntax checks passed. The implementation is packaged
+in `0.2.beta.2`; its website controls are deployed through the separate Cloudflare
+workshop. No frontend files enter the core jar. New runtime checks remain pending.
+
+## Encounter lifecycle
+
+`ClockworkBosses` registers commands, templates, selectors and native events.
+`ClockworkBossMarker` / `WardenMixin` attach saved identity to vanilla Wardens.
+Gameplay hooks require the boss marker.
+
+`ClockworkBossManager` owns loaded state, activation, attributes, phases, arena
+membership and cleanup. Native load/unload restores or releases it. Saved chunk
+data belongs to Minecraft; unloaded persistent bosses are separate from live
+runtime registrations.
+
+One watcher scans every ten game ticks while loaded state exists. Its registered
+dispatcher returns immediately when idle. Dormant activation/Darkness and arena
+membership share the scan. Active phase, emergence, attacks and aura use the
+Warden AI step. Queries use loaded sections and do not force chunks.
+
+Dormant depth is `ceil(5 * max(1, bounded native SCALE))`. Activation restores
+the saved emergence position, clears dormant refresh deadlines and plays the
+spawn sound once. Native memories/animation own emergence.
+
+## Settings, phases and attacks
+
+`ClockworkBossSettings` compiles immutable policies on spawn/load/reload.
+`ClockworkBossPhase` stores ordered stable keys and thresholds, with 1-16
+stages; the final stage has no leaving cutoff.
+
+`ClockworkBossSubphases` compiles up to sixteen attack/recovery children and
+sixteen roars per phase. `ClockworkBossState` owns indices, counts, deadlines,
+shuffle and generation. Parent phases own health, scale, glow, aura and effects.
+Completions advance children; phase changes/reload reset the sequence.
+
+`ClockworkBossMelee` captures a target UUID, deadline and policy for delayed
+native damage. Invalid target/range/visibility/generation cancels it.
+`ClockworkBossSonicCharge` captures a full beam definition; reload/phase changes
+apply to the next charge. Old completions cannot advance a replacement sequence.
+
+`ClockworkBossMeleeVisual` / `ClockworkBossChargeVisual` synchronize atomic
+timelines for native keyframe sampling. Packet delay remains a limit.
+`RoarMixin` observes native interlude tokens, sound cues and completion.
+`BrainRecoveryMixin` guards behavior start/tick calls inside `Brain.tick` for
+recovering marked bosses. Native sensors/memory expiry and Lithium's method
+implementations continue.
+
+`ClockworkBossTargets` / `ClockworkBossTargeting` handle holds, attack budgets,
+completion-driven rotation and titles. Native acquisition, eligibility, anger
+and target memory remain in use. Fired beams supply their captured reach.
+
+`BossHealthAttributeMixin` expands only marked MAX_HEALTH instances to
+1-1,000,000. Native damage/healing/modifier math/save/load stay authoritative;
+reload preserves health fraction.
+
+## Player support
+
+`ClockworkBossAreaEffects` shares activated arena membership with
+`ClockworkBossPlayerSupport`, `ClockworkBossPlayerHealth` and
+`ClockworkBossFightPotion`.
+
+Effects reconcile five allowed types on membership/config/native effect events.
+External effects take precedence; ownership prevents deleting their replacements.
+Health owns one named modifier and proportional floor changes. Native
+MAX_HEALTH updates reconcile equipment changes. Bosses save at most 4096
+first-entry-heal UUIDs independently of temporary state.
+
+Potions validate owner, exact arena and cooldown at start/completion.
+`ServerPlayerDataMixin` saves one shared game-time deadline, carried through
+respawn by native player-copy events. Native `Inventory.add` displaces offhand
+contents; cleanup checks the recorded slot and transfers live contents.
+Stack-capacity normalization alone is allowed. Changed/moved items stay put.
+
+Exit/death/disconnect/respawn, boss unload/removal and server stop release
+support owners. World containers are not globally scanned for bottles.
+
+`ServerPlayerDataMixin` also calls potion cleanup immediately before the native
+`ServerPlayer.die` death-loot invocation. Universal Graves captures inventory
+inside that invocation, earlier than Fabric's `AFTER_DEATH`. Releasing the grant
+here removes marked inventory/cursor copies and restores the unchanged personal
+offhand before capture. Totems and death vetoes never reach this committed-death
+boundary; keepInventory does. Later membership cleanup remains idempotent.
+A bottle already saved by an older build is removed on attempted use without a
+grant, using the existing item-use callback. No optional grave dependency or new
+tick check is required; compatibility is verified for the supplied Graves jar,
+not every possible mod that changes death mechanics.
+
+## Templates and saves
+
+The experimental [template tooling boundary](TEMPLATE_SCHEMA.md) separates the
+portable envelope from game-specific compilation. `ClockworkBossTemplateFormat`
+owns version 1, bounded duplicate-aware parsing and plain JSON export. It strips
+only documented root transport metadata; nested addon data is retained. Existing
+`ClockworkBossTemplateDocument` calls that parser and adds regenerated comments.
+The core resource, `ClockworkBossEditorSchema`, `ClockworkBossTemplateText` and
+`BossSetting` declarations drive schema generation rather than another field list.
+The GUI and schema share default-reset semantics for registered action fields.
+Schema generation never launches a server; a fixed operator command exports the
+frozen startup addon catalog using the existing atomic config publication helper.
+Server compilers retain domain/cross-field/registry validation. No website or
+schema-to-code execution engine is introduced.
+
+`ClockworkBossTemplateStore` owns names and
+`config/clockwork-bosses/boss-templates/<name>/template.json` plus template-local
+media. Presets live under `boss-presets`. Existing documents are preserved;
+there is no automatic folder migration.
+
+`ClockworkBossTemplateDocument` generates grouped `//` notes from one strict
+JSON defaults/comment catalog. Unknown values survive; comment wording is
+regenerated.
+
+`ClockworkBossTemplateEditor` owns one token/revision session per operator,
+64 maximum, 30-minute lazy expiry and disconnect/stop cleanup. Four editor/delete
+I/O jobs can run globally. Workers receive immutable registry metadata.
+
+`ClockworkBossEditorSchema` shares choices and exact bounds. Known scalar/order
+patches pass permission, session, revision and cross-field checks before writing.
+Stale/invalid saves preserve the prior file. Staged writes retain one rolling
+backup and acknowledge success after rereading the file.
+
+`ClockworkBossNumbers` bounds numeric input to 128 characters, 64 significant
+digits and decimal scale -64 to 64 before arithmetic/formatting. Exact decimal
+comparisons enforce ranges. Imported extremes display compactly without rewriting
+files. Shared `MAX_PATCH_BYTES` is 24,000 UTF-8 bytes; saves serialize once.
+
+`ClockworkBossSelector` checks tagged-arrow owner/session and permission.
+Client pre-attack handling sends one selection action and suppresses that
+gesture's ordinary punch/mining feedback.
+
+## Rewards
+
+`ClockworkBossLoot` validates policy and loaded tables.
+`ClockworkBossLootEntries` parses at most 32 immutable item entries, 64 items
+each. Each entry becomes an independent native pool at payout; empty lists skip
+native table/context construction.
+
+`BossLootMixin` wraps only the native table invocation for marked bosses.
+`ClockworkBossRewards` consumes entity-owned kill-credit data at committed
+Fabric `AFTER_DEATH`. It claims the persisted exactly-once flag before rolling
+and releases attacker/source references. Partial failures do not retry.
+
+Datapack mode uses the public native table overload; entries use matching entity
+context and native generation/stack splitting. There is no reward tick queue,
+global table registration or datapack write. See [loot](LOOT.md) for the policy.
+
+## Optional-client tracking (development source)
+
+The server keeps the same native Warden and full encounter state for everyone.
+Only outgoing metadata changes for a player without Clockwork Bosses:
+
+1. `WardenMixin` allocates its twelve native visual accessors and captures their
+   actual IDs in one shared `ClockworkBossClientData` layout. Include any future
+   visual accessor in that list, even if its default normally stays off the wire.
+2. Fabric negotiates the installed client's receiver channels. The core editor
+   receiver is registered for all users, including non-operators, so its presence
+   selects the full layout. This check neither grants permissions nor verifies
+   a jar version; installed clients must still match the server build.
+3. `ServerEntityMixin` adapts the initial pairing snapshot and dirty updates.
+   Modded recipients keep the original packet. Others omit our fields; later
+   other-mod Warden IDs shift down by the count of removed slots before them.
+   Their serializer/value records stay intact. Other required mods must still
+   have compatible client/server layouts.
+4. Dirty updates share one fallback packet through native filtered broadcasts.
+   Empty fallback lists send nothing. The server's stored metadata and tracked
+   snapshot are never changed, so either kind of client can join later.
+
+Ordinary Wardens use the adapter as well, because fields added by another mod
+can follow our slots even on an unmarked Warden. Non-Warden and attribute/movement
+packets retain their original calls. The shared layout holds integers only;
+there is no player registry, cleanup task, timer or extra watcher. Existing media
+senders already require their receiver channels, and the editor keeps its client
+requirement and operator checks.
+
+Server gameplay/native presentation remains available without the client mod;
+custom skins/glow/audio/editor and adjusted animation timing require it. Native
+client-local heartbeat volume and local max-health limits also remain unchanged
+without it. The adapter covers native tracking of this core's fields, not arbitrary
+addon registry or direct-packet formats. Compilation passed; mixed-client runtime
+checks remain pending. The installed 0.1 release lacks this source change.
+
+## Media, preview and diagnostics
+
+Media identities include the template. `ClockworkBossMediaCache` borrows bounded
+Minecraft I/O workers. `ClockworkBossMediaTransfers` uses negotiated chunks and
+receipts with one assembly per player. Generations/session checks reject stale
+results; receipts cannot choose paths.
+
+`WardenSkinTextureCache` owns bounded player/custom textures. Player mapping
+uses a transparent atlas with native rib plates; custom atlases come from each
+template's `skins/` folder. Mojang-only HTTPS work supplies player pixels.
+`WardenEmissiveMaskTexture` owns bounded white-alpha glow masks. Native metadata
+carries packed eye dimensions/coordinates and separate brows.
+
+`ClockworkBossTemplateScreen` owns a detached, unticked preview and isolated
+custom assets; closing releases them. Ordinary Wardens and foreign emissive
+textures retain their own render paths.
+
+`ClockworkBossSoundNetwork` validates OGGs without server-side decoding.
+`ClockworkBossSoundClient` uses native JOrbis/static channels/audio executor.
+Channel removal precedes buffer deletion; temporary upload memory is freed.
+
+`ClockworkBossMusic` shares arena membership/transport.
+`ClockworkBossMusicClient` retains compressed tracks and one native streaming
+channel. Native audio ticks advance fades/refills; lifecycle hooks close/resume
+owned streams. Server-file clips have no resource-pack `SoundInstance`, so mods
+that only process `SoundEngine.play` may not apply effects to them.
+
+`ClockworkBossDiagnostics` is an opt-in observer, off by default, bounded to
+2048 events and 128 active attack IDs. Salted aliases avoid names/full UUIDs or
+live entities. `/boss debug` controls capture/export without approving damage,
+selecting targets or changing AI. Normal shutdown attempts an active export;
+a forced kill cannot flush it.
+
+Development server/client/GUI checks use separate source sets and do not ship
+in the universal jar. [Preflight](PREFLIGHT.md) records evidence and limitations.
+Source review and compilation cannot establish every runtime/mod interaction.
+
+## Earlier build records
+
+These notes preserve the original build and review evidence. Version, installation,
+publication and pending-test statements describe when each note was written.
+Use the current sections above for setup and behavior. A later pass does not
+turn an earlier compile-only check into a playtest.
+
+Local `../work/` and `../outputs/` paths refer to the original development
+workspace. They are outside version control and may be absent in a clone.
+
+<details>
+<summary>Expand the dated notes and technical evidence</summary>
 
 ## Beta RC 8 template-owned reward tables — 2026-10-10
 
@@ -175,7 +470,7 @@ Existing installed RC1 and configuration files have not been deployed/edited.
 ## Subphases and captured attack timing (pending source)
 
 - `ClockworkBossSubphases` compiles bounded attack and roar catalogs on load/reload. It overlays non-null child combat fields onto the parent, then reuses `ClockworkBossSettings` for base inheritance and bounds. Roar entries inherit phase/base audio defaults only. Children never choose by health or recursively nest. Parent phases continue to own health, scale, Darkness, glow, bar and transition effects.
-- `ClockworkBossState` owns attack/roar indices, count, interlude flag and generation. Completed attacks enter one roar when enabled; matching native roar completion selects the next attack child. Sequential cycles both catalogs independently. Random attack order uses at most sixteen shuffled indices with no consecutive repeat at the round boundary; roar selection is independent and may repeat. Main-phase entry/reload resets both catalogs; random starts with a fresh shuffle. No transition resets a completed attack's captured cooldown. Old charged beams can finish without advancing a replacement sequence.
+- `ClockworkBossState` owns attack/roar indices, count, interlude flag and generation. Completed attacks enter one roar when enabled; matching native roar completion selects the next attack child. Sequential cycles both catalogs independently. Random attack order uses at most sixteen shuffled indices with no consecutive repeat at the round boundary; roar selection is independent and may repeat. Main-phase entry/reload resets both catalogs; random starts with a fresh shuffle. No transition resets a completed attack's captured cooldown. The experimental API interrupts pending beams with their owning action on phase changes/reload; completed attacks keep their captured cooldown.
 - `ClockworkBossMelee` postpones the existing native hit with one UUID/deadline/policy. The existing AI callback rechecks target identity, eligibility, range and native cached visibility, then invokes `doHurtTarget`. Invalid targets cancel; no chunks or new targeting AI are introduced. Starting a wind-up cancels unfinished Sonic Boom. Finally cleanup releases a vetoed hit's pose.
 - `ClockworkBossMeleeVisual` and `ClockworkBossChargeVisual` synchronize bounded atomic timelines. Renderer state samples native 26.3 keyframes using shared game time, so late tracking does not restart the wind-up. Configured recovery gates the next same-kind attack; native melee retains its own minimum cadence.
 - `RoarMixin` observes native start/continuation/stop and native sound playback only for a configured interlude token. The manager requests Minecraft's ROAR activity after attack recovery. Native roar owns target memory, navigation stop, pose and duration; completion advances the attack child once. Token changes interrupt obsolete roars. Native stop's target assignment retains the previous elapsed beam cooldown instead of adding a fresh default delay. A custom OGG replaces the native once-only audio cue (about 25 ticks in) through the normal template-local validated media path; blank uses vanilla audio. Clip length never controls attack resumption.
@@ -194,7 +489,7 @@ Existing installed RC1 and configuration files have not been deployed/edited.
 - Player `LEAVE` cleanup runs before native saving. Death and `COPY_FROM` release old entity references/membership; the existing scan admits eligible replacement players. Boss death immediately releases contributions, and dying bosses cannot regrant effects. Boss unload/removal/shutdown releases the same requests. Native Fabric effect permission callbacks remain respected.
 - `ClockworkBossPhase` translates health percentage and configured transition cutoffs into ANNOYED, AGITATED, ENRAGED, or FURY. `applyPhaseIfChanged` applies attributes and synced visuals only when the phase actually changes.
 - `ClockworkBossSonicBoom` handles the custom attack after vanilla target selection. It lets normal Warden navigation and melee AI run, and uses the Warden brain's cooldown memories to avoid duplicate tick countdowns.
-- `ClockworkBossSonicCharge` captures every Sonic Boom setting and its melee-yield rule at charge entry. The immutable definition survives threshold crossings, healing and reload, including disabling the next charge. Native target eligibility and the captured range/obstruction rules can still cancel it. A switched target cancels rather than receiving an old telegraph; unload releases the record.
+- `ClockworkBossSonicCharge` captures every Sonic Boom setting and its melee-yield rule at charge entry. An uninterrupted action uses this immutable snapshot. The experimental action runtime cancels pending charges on phase transitions, reload and other action interruptions; a replacement starts its own full wind-up. Native target eligibility and captured range/obstruction rules can also cancel it. A switched target cannot receive an old telegraph; unload releases the record.
 
 ## Attack voice lines
 
@@ -375,3 +670,5 @@ ClockworkBossState owns transient target UUID/time/attack count. ClockworkBossTa
 Server media-cache reservations are acquired under its lock; future consumers run outside it, even when worker submission is rejected. A bounded rejected backlog is drained with failed completions. Encounter music uses its existing membership scan to retry temporary file/transport capacity, cancelling any start control whose transfer was refused. File-validation failures still require reload.
 
 The editor invalidates its active token on external screen removal, sends its session close and releases detached preview state. Internal picker/document replacement retains the session. Preview metadata uses an edit/refresh invalidation flag; render snapshots remain native and fresh each frame. Mask cache keys store source/alignment/preview identity and cache their registered identifiers, with ownership-checked eviction. Music submission rejection releases reservations/unattached streams; failed channel futures stop the request. None of these changes creates another recurring callback or executor.
+
+</details>

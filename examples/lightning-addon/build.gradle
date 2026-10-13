@@ -1,0 +1,42 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version '1.18.2'
+}
+
+version = '0.1.3'
+group = 'clockwork.example'
+base { archivesName = 'clockwork_lightning_example' }
+
+// Use the parent's configured artifact, never an older jar left in build/libs.
+// This remains a separate project and imports only the core's public API.
+def coreBuildProperties = new Properties()
+file('../../gradle.properties').withInputStream { input -> coreBuildProperties.load(input) }
+def coreVersion = coreBuildProperties.getProperty('mod_version')
+def coreArchiveName = coreBuildProperties.getProperty('archives_base_name')
+if (!coreVersion || !coreArchiveName) throw new GradleException('The core gradle.properties must define mod_version and archives_base_name')
+def coreJar = file("../../build/libs/${coreArchiveName}-${coreVersion}.jar")
+if (!coreJar.isFile()) throw new GradleException("Build the matching core jar first: gradlew jar sourcesJar (expected ${coreJar.name})")
+
+// Experimental APIs have no forward-compatibility promise. Pin the runtime
+// dependency to the same core version used to compile; rebuilding updates both.
+def addonResourceProperties = [version: project.version.toString(), core_version: coreVersion]
+processResources {
+    inputs.properties(addonResourceProperties)
+    filteringCharset = 'UTF-8'
+    filesMatching('fabric.mod.json') { expand(addonResourceProperties) }
+}
+dependencies {
+    minecraft 'com.mojang:minecraft:26.3'
+    implementation 'net.fabricmc:fabric-loader:0.19.5'
+    implementation 'net.fabricmc.fabric-api:fabric-api:0.161.0+26.3'
+    compileOnly files(coreJar)
+    runtimeOnly files(coreJar)
+}
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+    withSourcesJar()
+}
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release.set(25)
+}

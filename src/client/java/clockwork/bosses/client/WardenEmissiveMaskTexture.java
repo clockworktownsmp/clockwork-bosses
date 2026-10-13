@@ -23,6 +23,7 @@ public final class WardenEmissiveMaskTexture {
     private static final String WARDEN_TEXTURE_PREFIX = "textures/entity/warden/";
     private static final String WARDEN_BIOLUMINESCENT_LAYER =
             WARDEN_TEXTURE_PREFIX + "warden_bioluminescent_layer.png";
+    private static final String WARDEN_TENDRIL_SOURCE = WARDEN_TEXTURE_PREFIX + "warden.png";
     private static final String MASK_TEXTURE_PREFIX = "warden_emissive_tint_mask/";
     private static final int WARDEN_HEAD_FRONT_X = 10;
     private static final int WARDEN_HEAD_FRONT_Y = 42;
@@ -31,14 +32,14 @@ public final class WardenEmissiveMaskTexture {
     // The five native 26.3 sources include warden.png for the tendrils.
     // Other mods' emissive sources keep their own texture and tint behavior.
     private static final Set<String> SUPPORTED_TEXTURES = Set.of(
-            WARDEN_BIOLUMINESCENT_LAYER, WARDEN_TEXTURE_PREFIX + "warden.png",
+            WARDEN_BIOLUMINESCENT_LAYER, WARDEN_TENDRIL_SOURCE,
             WARDEN_TEXTURE_PREFIX + "warden_heart.png",
             WARDEN_TEXTURE_PREFIX + "warden_pulsating_spots_1.png",
             WARDEN_TEXTURE_PREFIX + "warden_pulsating_spots_2.png");
     // Bound our extra resource-pack allocation before NativeImage decodes pixels.
     private static final int MAX_MASK_IMAGE_BYTES = 4 * 1024 * 1024;
     private static final int MAX_MASK_DIMENSION = 1024;
-    private record MaskKey(Identifier source, int eyes, int brows, boolean preview) {}
+    private record MaskKey(Identifier source, int eyes, int brows, int pupils, boolean preview) {}
     private record MaskTexture(Identifier id, DynamicTexture texture) {}
     // Non-face keys never depend on alignment and can be reused by every render.
     // Face lookups allocate only a small key; identifiers/paths and normalized
@@ -46,7 +47,7 @@ public final class WardenEmissiveMaskTexture {
     private static final Map<Identifier, MaskKey> SHARED_KEYS = SUPPORTED_TEXTURES.stream()
             .filter(path -> !path.equals(WARDEN_BIOLUMINESCENT_LAYER))
             .map(Identifier::withDefaultNamespace)
-            .collect(java.util.stream.Collectors.toUnmodifiableMap(id -> id, id -> new MaskKey(id, 0, 0, false)));
+            .collect(java.util.stream.Collectors.toUnmodifiableMap(id -> id, id -> new MaskKey(id, 0, 0, 0, false)));
     private static final Map<MaskKey, MaskTexture> TEXTURES =
             new LinkedHashMap<>(16, 0.75F, true);
     // A broken resource pack must not retry image decoding and log every frame.
@@ -67,6 +68,11 @@ public final class WardenEmissiveMaskTexture {
 
     /** Preview brightness is a separate bounded face-mask variant; live mask opacity is unchanged. */
     public static Identifier getTexture(Identifier sourceTexture, int coordinates, int browCoordinates, boolean preview) {
+        return getTexture(sourceTexture, coordinates, browCoordinates, clockwork.bosses.ClockworkBossPupils.DEFAULT.packed(), preview);
+    }
+
+    /** Pupil edits participate in the existing bounded face cache; shared non-face masks do not vary. */
+    public static Identifier getTexture(Identifier sourceTexture, int coordinates, int browCoordinates, int pupilSettings, boolean preview) {
         if (!sourceTexture.getNamespace().equals("minecraft")
                 || !SUPPORTED_TEXTURES.contains(sourceTexture.getPath())) {
             return null;
@@ -74,7 +80,7 @@ public final class WardenEmissiveMaskTexture {
         if (FAILED_TEXTURES.containsKey(sourceTexture)) return null;
 
         boolean face = sourceTexture.getPath().equals(WARDEN_BIOLUMINESCENT_LAYER);
-        MaskKey key = face ? new MaskKey(sourceTexture, coordinates, browCoordinates, preview) : SHARED_KEYS.get(sourceTexture);
+        MaskKey key = face ? new MaskKey(sourceTexture, coordinates, browCoordinates, pupilSettings, preview) : SHARED_KEYS.get(sourceTexture);
         TextureManager textureManager = Minecraft.getInstance().getTextureManager();
         MaskTexture cached = TEXTURES.get(key);
         if (cached != null && textureManager.getTexture(cached.id()) == cached.texture()) return cached.id();
@@ -90,11 +96,11 @@ public final class WardenEmissiveMaskTexture {
             // Match the raw lookup key's identity; drawing still normalizes its
             // coordinates. Distinct malformed aliases cannot replace/close an
             // atlas still referenced by another cached entry with the same ID.
-            maskPath += "/eyes_" + coordinates + "_brows_" + browCoordinates + (preview ? "_preview" : "");
+            maskPath += "/eyes_" + coordinates + "_brows_" + browCoordinates + "_pupils_" + pupilSettings + (preview ? "_preview" : "");
         Identifier maskTexture = Identifier.fromNamespaceAndPath(ClockworkBosses.MOD_ID, maskPath);
         DynamicTexture texture = null;
 
-        NativeImage mask = createWhiteTintMask(sourceTexture, eyes.packed(), brows.packed(), preview);
+        NativeImage mask = createWhiteTintMask(sourceTexture, eyes.packed(), brows.packed(), pupilSettings, preview);
         if (mask == null) {
             rememberFailure(sourceTexture);
             return null;
@@ -141,17 +147,28 @@ public final class WardenEmissiveMaskTexture {
         }
     }
 
-    /** Preserves coverage while replacing baked cyan RGB with a neutral white tint mask. */
-    private static NativeImage createWhiteTintMask(Identifier sourceTexture, int coordinates, int browCoordinates, boolean preview) {
+    /** Preserve native glow coverage while removing baked cyan. The tendril
+     * source is a complete base atlas, so its mask must also exclude body UVs. */
+    private static NativeImage createWhiteTintMask(Identifier sourceTexture, int coordinates, int browCoordinates, int pupilSettings, boolean preview) {
         NativeImage mask = null;
         try (InputStream input = Minecraft.getInstance().getResourceManager().open(sourceTexture);
              NativeImage source = readBoundedMaskSource(input)) {
             mask = new NativeImage(source.getWidth(), source.getHeight(), false);
+            boolean tendrils = sourceTexture.getPath().equals(WARDEN_TENDRIL_SOURCE);
             for (int y = 0; y < source.getHeight(); y++) {
                 for (int x = 0; x < source.getWidth(); x++) {
                     int pixel = source.getPixel(x, y);
                     int alpha = (pixel >>> 24) & 0xFF;
-                    // Keep vanilla's exact coverage and alpha. A white RGB mask
+                    // Native 26.3 tendril planes use these front/back regions
+                    // of the 128-unit atlas. Normalize pack resolution only;
+                    // skin pixels and other emissive sources are untouched.
+                    // Relying on the native tendril-only model alone lets a
+                    // replacement/full model tint the entire opaque base atlas.
+                    if (tendrils) {
+                        int u = x * 128 / source.getWidth(), v = y * 128 / source.getHeight();
+                        if (!(u >= 58 && u < 90 && v < 16 || u >= 52 && u < 84 && v >= 32 && v < 48)) alpha = 0;
+                    }
+                    // Preserve alpha within the glow regions. A white RGB mask
                     // avoids the baked cyan texture suppressing red/orange tint
                     // channels during the emissive shader's color multiplication.
                     mask.setPixel(x, y, (alpha << 24) | 0x00FFFFFF);
@@ -164,7 +181,7 @@ public final class WardenEmissiveMaskTexture {
             if (sourceTexture.getPath().equals(WARDEN_BIOLUMINESCENT_LAYER)
                     && mask.getWidth() == 128
                     && mask.getHeight() == 128) {
-                applyAngryEyeMask(mask, coordinates, browCoordinates, preview);
+                applyAngryEyeMask(mask, coordinates, browCoordinates, pupilSettings, preview);
             }
             return mask;
         } catch (IOException | RuntimeException exception) {
@@ -211,6 +228,11 @@ public final class WardenEmissiveMaskTexture {
     }
 
     static void applyAngryEyeMask(NativeImage mask, int coordinates, int browCoordinates, boolean preview) {
+        applyAngryEyeMask(mask, coordinates, browCoordinates, clockwork.bosses.ClockworkBossPupils.DEFAULT.packed(), preview);
+    }
+
+    /** Draw only clipped eye-local rectangles; pupil pixels retain the same darker phase hue. */
+    static void applyAngryEyeMask(NativeImage mask, int coordinates, int browCoordinates, int pupilSettings, boolean preview) {
         if (mask.getWidth() != 128 || mask.getHeight() != 128) {
             return;
         }
@@ -240,13 +262,17 @@ public final class WardenEmissiveMaskTexture {
         // Draw each scaled eye at its independent position. Neutral gray multiplies the
         // current phase tint into a darker shade, without forcing a different hue.
         var eyes = clockwork.bosses.ClockworkBossEyes.unpack(coordinates);
+        var pupils = clockwork.bosses.ClockworkBossPupils.unpack(pupilSettings);
         for (int eye = 0; eye < 2; eye++) {
             int left = WARDEN_HEAD_FRONT_X + (eye == 0 ? eyes.leftX() : eyes.rightX());
             int top = WARDEN_HEAD_FRONT_Y + (eye == 0 ? eyes.leftY() : eyes.rightY());
+            boolean visible = pupils.visibleIn(eyes, eye == 1);
+            int pupilX = pupils.xIn(eyes, eye == 1), pupilY = pupils.yIn(eyes, eye == 1);
+            int pupilWidth = pupils.widthIn(eyes), pupilHeight = pupils.heightIn(eyes);
             for (int dy = 0; dy < eyes.height(); dy++) {
                 for (int dx = 0; dx < eyes.width(); dx++) {
-                    boolean pupil = eyes.width() >= 2 && eyes.height() >= 2
-                            && dy == eyes.height() - 1 && dx == (eye == 0 ? eyes.width() - 1 : 0);
+                    boolean pupil = visible && dx >= pupilX && dx < pupilX + pupilWidth
+                            && dy >= pupilY && dy < pupilY + pupilHeight;
                     mask.setPixel(left + dx, top + dy, pupil ? 0xFF666666 : 0xFFFFFFFF);
                 }
             }

@@ -72,6 +72,28 @@ public final class ClockworkBossState {
     // A recovery holds one game-time deadline, checked by the existing native
     // AI step. Resetting/changing the sequence clears it; no scheduled task survives.
     private long recoveryDeadline = -1;
+    // Action ownership is attached to this loaded encounter, never a global timer.
+    // Manager transitions stop it before replacing phase/config state.
+    private ClockworkBossActionRuntime actionRuntime;
+    // Stop callbacks may reenter phase/reload code. Defer starting a replacement
+    // until every outgoing resource has been restored; no extra task is needed.
+    private int stoppingActions;
+    boolean actionsStopping() { return stoppingActions != 0; }
+    void beginActionStop() { stoppingActions++; }
+    void endActionStop() { stoppingActions--; }
+    private boolean encounterEnded;
+    public ClockworkBossActionRuntime actionRuntime() { return actionRuntime; }
+    public void setActionRuntime(ClockworkBossActionRuntime runtime) { actionRuntime = runtime; }
+    public boolean claimEncounterEnd() { if (encounterEnded) return false; encounterEnded = true; return true; }
+    public boolean encounterEnded() { return encounterEnded; }
+    /** A callback can end this encounter or change its generation during stop.
+     * The outer transition must then abandon its stale settings/index changes. */
+    private boolean stopActionForTransition(clockwork.bosses.api.BossAction.StopReason reason) {
+        var previous = actionRuntime;
+        long generation = subphaseGeneration;
+        if (previous != null) previous.stop(reason);
+        return !encounterEnded && actionRuntime == previous && subphaseGeneration == generation;
+    }
     public boolean recoverySubphase() {
         var step = subphase();
         return !roarInterlude() && step != null && step.type() == ClockworkBossSubphases.Type.RECOVERY;
@@ -79,7 +101,6 @@ public final class ClockworkBossState {
     public void beginRecovery(long now) {
         if (recoverySubphase() && recoveryDeadline < 0) recoveryDeadline = now + subphase().durationTicks();
     }
-    public boolean recoveryFinished(long now) { return recoverySubphase() && recoveryDeadline >= 0 && now >= recoveryDeadline; }
     /** Read-only deadline for diagnostics; native world time remains authoritative. */
     public long recoveryDeadline() { return recoveryDeadline; }
     private ClockworkBossMelee.Pending pendingMelee;
@@ -110,37 +131,43 @@ public final class ClockworkBossState {
     public long subphaseGeneration() { return subphaseGeneration; }
     public boolean roarInterlude() { return inSubphaseRoar && sequence() != null; }
     /** Selected roar sound is a load-time snapshot, not a per-tick merge. */
-    public JsonObject roarInterludeSound() { return roarInterlude() ? sequence().roars().get(activeRoarIndex) : null; }
+    public clockwork.bosses.api.BossActionSettings roarInterludeSettings() { return roarInterlude() ? sequence().roars().get(activeRoarIndex) : null; }
     /** Real attacks only; counters never depend on target changes or polling. */
     public boolean completeSubphaseAttack(net.minecraft.util.RandomSource random) {
         var step = subphase();
-        if (step == null || roarInterlude() || recoverySubphase()) return false;
+        if (step == null || roarInterlude() || step.type() != ClockworkBossSubphases.Type.ATTACK) return false;
         return completeSubphase(random);
     }
-    /** Both an attack budget and a recovery deadline enter the same transition
-     * path, so independent roar cycling/order rules stay consistent. */
-    public boolean completeRecovery(net.minecraft.util.RandomSource random) { return completeSubphase(random); }
+    /** An action signals its own completion; native attack budgets retain their
+     * old counting path. Roars still use the independent interlude catalog. */
+    public boolean completeAction(net.minecraft.util.RandomSource random) {
+        var step = subphase(); if (step == null) return false;
+        subphaseAttacks = step.attacks() - 1;
+        return completeSubphase(random);
+    }
     private boolean completeSubphase(net.minecraft.util.RandomSource random) {
         var step = subphase();
         if (step == null) return false;
         if (!recoverySubphase() && ++subphaseAttacks < step.attacks()) return false;
+        if (!stopActionForTransition(clockwork.bosses.api.BossAction.StopReason.COMPLETED)) return false;
         var sequence = sequence();
         if (sequence.roarBetween() && !sequence.roars().isEmpty()) {
             inSubphaseRoar = true; subphaseAttacks = 0; subphaseGeneration++;
             if (sequence.order() == ClockworkBossSubphases.Order.RANDOM) activeRoarIndex = random.nextInt(sequence.roars().size());
             else { activeRoarIndex = nextRoarIndex; nextRoarIndex = (nextRoarIndex + 1) % sequence.roars().size(); }
-        } else advanceSubphase(random);
+        } else return advanceSubphase(random);
         return true;
     }
     /** Roar completion, or a direct transition when interludes are disabled.
      * Each sequential list cycles independently; random children use a shuffle bag. */
-    public void advanceSubphase(net.minecraft.util.RandomSource random) {
+    public boolean advanceSubphase(net.minecraft.util.RandomSource random) {
         var sequence = sequence();
-        if (sequence == null) return;
+        if (sequence == null || !stopActionForTransition(clockwork.bosses.api.BossAction.StopReason.COMPLETED)) return false;
         subphaseIndex = sequence.order() == ClockworkBossSubphases.Order.RANDOM ? drawSubphase(random, subphaseIndex)
                 : (subphaseIndex + 1) % sequence.steps().size();
         inSubphaseRoar = false; subphaseAttacks = 0; recoveryDeadline = -1;
         subphaseGeneration++;
+        return true;
     }
     /** Fisher–Yates, at most 16 indices per refill. Every child runs before
      * reshuffling; swap the first draw to prevent a repeat at a round boundary. */
@@ -291,13 +318,14 @@ public final class ClockworkBossState {
     public ClockworkBossLoot loot() { return loot; }
     public JsonObject config() { return config; }
     /** Publishes config/compiled AI values together; the existing immutable Sonic charge keeps its original definition. */
-    public void setConfig(JsonObject config) {
+    public boolean setConfig(JsonObject config) {
         ClockworkBossLoot compiledLoot = ClockworkBossLoot.read(config);
         ClockworkBossSettings compiled = ClockworkBossSettings.read(config);
         var compiledSubphases = ClockworkBossSubphases.read(config, compiled);
         ClockworkBossAreaEffects.Settings compiledAreaEffects = ClockworkBossAreaEffects.Settings.read(config);
         var compiledSupport = ClockworkBossPlayerSupport.read(config);
         Areas compiledAreas = ClockworkBossManager.readAreas(config);
+        if (!stopActionForTransition(clockwork.bosses.api.BossAction.StopReason.RELOADED)) return false;
         // Editing a trigger/radius starts a fresh occupancy baseline. Players
         // already inside the new region do not count as a new entry on reload.
         if (areas != null && !areas.equals(compiledAreas)) {
@@ -305,6 +333,7 @@ public final class ClockworkBossState {
             activationInsidePlayerIds = Set.of();
             previousRedstonePowered = false;
         }
+        actionRuntime = null;
         this.config = config;
         this.loot = compiledLoot;
         this.settings = compiled;
@@ -318,6 +347,7 @@ public final class ClockworkBossState {
         activationRadiusBox = new AABB(emergenceCenter.x - radius, emergenceCenter.y - radius, emergenceCenter.z - radius,
                 emergenceCenter.x + radius, emergenceCenter.y + radius, emergenceCenter.z + radius);
         endVoiceLine();
+        return true;
     }
     /** Prevalidated primitives avoid JSON traversal on every native AI step. */
     public ClockworkBossSettings settings() { return settings; }
@@ -342,12 +372,18 @@ public final class ClockworkBossState {
     public void setBossBarPlayerIds(Set<UUID> ids) { bossBarPlayerIds = Set.copyOf(ids); }
     /** Null means first assignment; first assignment does not emit transition effects. */
     public ClockworkBossPhase currentPhase() { return currentPhase; }
-    public void setCurrentPhase(ClockworkBossPhase phase) { currentPhase = phase; resetSubphase(); }
+    public boolean setCurrentPhase(ClockworkBossPhase phase) {
+        if (!stopActionForTransition(clockwork.bosses.api.BossAction.StopReason.PHASE_CHANGED)) return false;
+        actionRuntime = null; currentPhase = phase; resetSubphase();
+        return true;
+    }
 
-    /** One complete captured beam; enabled-state changes/reload affect only subsequent charges. */
+    /** One complete captured beam until its owning action is interrupted.
+     * Phase transitions/reloads stop that action and cancel its pending damage. */
     public ClockworkBossSonicCharge sonicCharge() { return sonicCharge; }
     public void startSonicCharge(UUID target, long now, ClockworkBossSettings.Phase phase) {
-        sonicCharge = ClockworkBossSonicCharge.start(target, now, phase, subphaseGeneration);
+        sonicCharge = ClockworkBossSonicCharge.start(target, now, phase, subphaseGeneration,
+                phase.meleeEnabled() && (actionRuntime == null || actionRuntime.allows(ClockworkBossActions.MELEE)));
     }
 
     /** Clears only custom charge state; the native brain remains the authority for cooldown. */

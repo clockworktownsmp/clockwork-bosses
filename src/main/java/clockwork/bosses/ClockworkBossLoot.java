@@ -16,7 +16,8 @@ import java.util.List;
 /** Template-wide item rewards. Missing settings keep vanilla behavior; no phase or tick work is needed. */
 public record ClockworkBossLoot(boolean enabled, ResourceKey<LootTable> table, boolean keepVanilla,
                                 String source, List<ClockworkBossLootEntries.Entry> entries) {
-    public static final ClockworkBossLoot DISABLED = new ClockworkBossLoot(false, null, true, "table", List.of());
+    public static final String DEFAULT_SOURCE = "table";
+    public static final ClockworkBossLoot DISABLED = new ClockworkBossLoot(false, null, true, DEFAULT_SOURCE, List.of());
 
     /** Parse strictly, so a typo cannot silently turn replacement into extra drops. */
     public static ClockworkBossLoot read(JsonObject config) {
@@ -36,7 +37,7 @@ public record ClockworkBossLoot(boolean enabled, ResourceKey<LootTable> table, b
         String id = text(section, "loot_table", "");
         ResourceKey<LootTable> table = id.isEmpty() ? null : parseTable(id);
         // Omitted source means the RC7 datapack behavior, even if a file has a nonempty table ID.
-        String source = text(section, "source", "table");
+        String source = text(section, "source", DEFAULT_SOURCE);
         if (!source.equals("table") && !source.equals("entries")) throw new IllegalArgumentException("loot.source must be entries or table");
         var entries = ClockworkBossLootEntries.read(section);
         if (enabled && source.equals("table") && table == null) throw new IllegalArgumentException("Set loot.loot_table before enabling loot");

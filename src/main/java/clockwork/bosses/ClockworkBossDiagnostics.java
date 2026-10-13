@@ -1,5 +1,6 @@
 package clockwork.bosses;
 
+import clockwork.bosses.ClockworkBossPermissions.Action;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -100,23 +101,26 @@ public final class ClockworkBossDiagnostics {
         return entries;
     }
     public static int toggle(CommandSourceStack source, boolean on) {
+        if (!Action.DEBUG.require(source)) return 0;
         if (on) start(); else { enabled = false; ATTACKS.clear(); } // Off freezes evidence until dump/clear.
         source.sendSuccess(() -> Component.literal("Boss diagnostics " + (on ? "enabled; previous capture cleared." : "disabled; capture retained.")), false);
         return 1;
     }
     public static int status(CommandSourceStack source) {
+        if (!Action.DEBUG.require(source)) return 0;
         source.sendSuccess(() -> Component.literal("Boss diagnostics: " + (enabled ? "ON" : "OFF")
                 + ", " + EVENTS.size() + "/" + LIMIT + " events, " + overwritten + " older events overwritten."), false);
         return 1;
     }
     public static int clearCommand(CommandSourceStack source) {
+        if (!Action.DEBUG.require(source)) return 0;
         clear(); return status(source);
     }
-    /** An explicit operator dump performs bounded local IO. No template file,
+    /** An explicitly authorized dump performs bounded local IO. No template file,
      * audio/skin bytes, credentials, chat, names or connection addresses are read.
      * The runtime mod inventory identifies the exact integration under test. */
     public static int dump(CommandSourceStack source) {
-        try {
+        if (!Action.DEBUG.require(source)) return 0;
             JsonObject report = new JsonObject();
             report.addProperty("schema", 1); report.addProperty("captured_at", Instant.now().toString());
             report.addProperty("enabled", enabled); report.addProperty("overwritten_events", overwritten);
@@ -125,26 +129,32 @@ public final class ClockworkBossDiagnostics {
             FabricLoader.getInstance().getAllMods().stream().sorted(java.util.Comparator.comparing(m -> m.getMetadata().getId()))
                     .forEach(mod -> mods.addProperty(mod.getMetadata().getId(), mod.getMetadata().getVersion().getFriendlyString()));
             report.add("runtime_mods", mods);
+            report.add("events", snapshot());
+            Path configRoot = FabricLoader.getInstance().getConfigDir();
+            Path folder = FabricLoader.getInstance().getGameDir().resolve("logs/clockwork-bosses-debug");
+        // The event snapshot belongs to the native thread. Bounded hashing,
+        // formatting and writing belong to the file worker, like other commands.
+        return ClockworkBossTemplateTasks.command(source, Action.DEBUG, "Could not write boss diagnostics: ", () -> {
             // Fingerprints identify locally installed integration settings without
             // including their contents (which may contain user-supplied text).
             JsonObject configHashes = new JsonObject();
             for (String relative : java.util.List.of("lithium.properties", "bettercombat/server.json5", "combatroll.json5")) {
-                Path config = FabricLoader.getInstance().getConfigDir().resolve(relative);
-                if (Files.isRegularFile(config, java.nio.file.LinkOption.NOFOLLOW_LINKS) && Files.size(config) <= 2 * 1024 * 1024)
-                    configHashes.addProperty(relative, com.google.common.hash.Hashing.sha256().hashBytes(Files.readAllBytes(config)).toString());
+                Path config = configRoot.resolve(relative);
+                if (Files.isRegularFile(config, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    try (var input = Files.newInputStream(config, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                        byte[] bytes = input.readNBytes(2 * 1024 * 1024 + 1);
+                        if (bytes.length <= 2 * 1024 * 1024)
+                            configHashes.addProperty(relative, com.google.common.hash.Hashing.sha256().hashBytes(bytes).toString());
+                    }
+                }
             }
-            report.add("known_config_sha256", configHashes); report.add("events", snapshot());
-            Path folder = FabricLoader.getInstance().getGameDir().resolve("logs/clockwork-bosses-debug");
+            report.add("known_config_sha256", configHashes);
             Files.createDirectories(folder);
             Path file = folder.resolve("capture-" + System.currentTimeMillis() + "-" + UUID.randomUUID().toString().substring(0, 8) + ".json");
             Files.writeString(file, new GsonBuilder().setPrettyPrinting().create().toJson(report), StandardCharsets.UTF_8,
                     java.nio.file.StandardOpenOption.CREATE_NEW);
-            source.sendSuccess(() -> Component.literal("Saved diagnostics to logs/clockwork-bosses-debug/" + file.getFileName()), false);
-            return 1;
-        } catch (java.io.IOException failure) {
-            source.sendFailure(Component.literal("Could not write boss diagnostics: " + failure.getClass().getSimpleName()));
-            return 0;
-        }
+            return file;
+        }, file -> source.sendSuccess(() -> Component.literal("Saved diagnostics to logs/clockwork-bosses-debug/" + file.getFileName()), false));
     }
 
     /** One ID per debug attack, bounded even if an encounter never completes.

@@ -1,17 +1,9 @@
-# Template loot — 0.1
+# Template loot - 0.1
 
-Version 0.1 is installed in Test Client and the test server. Previous RC8 jars
-were backed up and both installed copies match the tested build's SHA-256.
-Deployment record: `../work/release01-deployment.json`.
-
-Version **0.1** is now installed, with bounded numeric notation, exact
-editor range checks and no table/context construction for empty reward lists.
-Fresh checks passed: 4384 audit assertions, 1038 native GUI assertions, 28/28
-server tests with and without the supplied pack, and a production-jar pack-server
-spawn/activation/save/removal run. Evidence: `../work/release01-results.json`.
-Existing installed configurations, media and worlds were preserved.
-
-## Create and edit rewards in the GUI
+Use **Entry editor** for ordinary item rewards or **Datapack table** for an
+existing loaded server table. New templates use disabled loot with an empty
+entry list. Older files missing loot keep their existing behavior.
+## Add item rewards
 
 Open `/boss template edit <template>` or `/boss template edit preset <preset>`.
 Choose **Loot**, set **Source: Entry editor**, then open **Reward entries**.
@@ -30,10 +22,11 @@ Escape/Back cancels the item window, retaining unsaved text. Closing the editor
 uses the existing unsaved-change confirmation. Adding an item does not give it
 to the operator or change the actual inventory. The picker selects default
 items, without custom components, potion variants, enchantments or item NBT.
-Those belong to future entry kinds; datapack tables already support advanced
-native loot behavior.
+Use datapack tables for advanced native loot behavior.
 
 ## Stored definition and limits
+
+Put this fragment at the template root:
 
 ```json
 "loot": {
@@ -54,7 +47,8 @@ native loot behavior.
 ```
 
 - 0–32 named entries; keys use 1–48 lowercase letters/numbers/underscores/hyphens.
-- Registered, non-air vanilla or mod item IDs; explicit lowercase namespace:path.
+- Registered, non-air vanilla or mod item IDs; explicit lowercase namespace:path,
+  at most 256 characters.
 - Quantities: whole numbers 1–64, minimum no greater than maximum. Native uniform
   count includes both endpoints. Minecraft splits items into valid stack sizes.
 - Chance: 0–100% in the GUI, 0–1 on disk. Zero never drops; 100% always drops.
@@ -77,7 +71,7 @@ creates trusted defaults and accepts bounded scalar changes. Unknown objects
 cannot be inserted by a client. Item existence, count pairs and chance are
 checked before backup/publication. Invalid saves preserve exact file bytes and
 revision; stale saves are rejected. Valid saves retain the rolling GUI backup.
-Use matching client/server jars. Both test installations now have version 0.1.
+Use matching client/server jars.
 
 ## Death behavior and extension boundary
 
@@ -94,6 +88,44 @@ ClockworkBossRewards owns committed payout; AI does not grant rewards. New entry
 kinds can extend this boundary without replacing the lifecycle or editor save
 transaction. The picker uses native creative categories, stacks and widgets;
 all selection is local draft work until the existing authenticated Save.
+
+## Datapack requirements
+
+The table must already be loaded on the server, with an explicit lowercase
+namespace/path of at most 256 characters. It must require only parameters
+available on native entity death; block/tool-only contexts are rejected.
+A registered empty table is valid.
+
+Use Minecraft's `/reload` after datapack edits, then `/boss reload` for template
+settings. Omitted `source` retains legacy `table` mode; explicit choices are
+`table` and `entries`. Selecting the same table for vanilla and configured slots
+with Keep gives two rolls. If a selected table becomes unavailable after loading,
+the death-time check warns and retains vanilla table drops.
+
+An invalid live reload keeps the boss's previous valid settings.
+## Recorded checks and remaining work
+
+The 2026-10-10 release recorded 4384 audit assertions, 1038 native GUI assertions
+and 28/28 server tests with and without the supplied pack, plus a local
+production-jar spawn/activate/save/remove/shutdown pass.
+Evidence: `../work/release01-results.json` in the original workspace.
+
+Real network/high-latency and full-pack client play remain untested.
+The stale-table test simulates a removed registry key, not concurrent live
+datapack reload. See [modpack testing](MODPACK_TESTING.md) and
+[compatibility testing](COMPATIBILITY_TESTING.md) for limits/manual scenarios.
+## Earlier build records
+
+These notes preserve the original build and review evidence. Version, installation,
+publication and pending-test statements describe when each note was written.
+Use the current sections above for setup and behavior. A later pass does not
+turn an earlier compile-only check into a playtest.
+
+Local `../work/` and `../outputs/` paths refer to the original development
+workspace. They are outside version control and may be absent in a clone.
+
+<details>
+<summary>Expand the dated notes and technical evidence</summary>
 
 ## RC8 local verification — 2026-10-10
 
@@ -125,7 +157,7 @@ and known nonfatal warnings retain the limits in MODPACK_TESTING.md.
 
 The following records the previous table-ID feature and its tests.
 
-# Template loot — Beta RC 7
+### Template loot — Beta RC 7
 
 RC7 adds template-wide native item loot, with no new watcher or loot packets.
 The universal jar is installed in Test Client and the remote test server.
@@ -222,3 +254,5 @@ disabled network services retain the scope described in `MODPACK_TESTING.md`.
 Non-fatal pack messages remain; these results are not a full-pack guarantee.
 Local evidence is outside version control in `../work/rc7-loot-*.log/.xml` and
 `../work/rc7-loot-results.json`.
+
+</details>

@@ -1,33 +1,74 @@
-# Supplied server pack — 0.1
+# Supplied server-pack testing - 0.1
 
-## Version 0.1 — 2026-10-10
+These isolated checks verify the tested server logic and production-jar startup.
+The actual matching clients, resource packs and multiplayer network conditions
+still need an encounter test.
 
-All 28 server GameTests passed in the isolated supplied pack and without the
-pack. The packaged 0.1 production jar reached normal readiness, spawned and
-activated a boss, saved and removed it, then shut down normally with exit code 0.
-Reports: `../work/release01-modpack.xml`, `../work/release01-native.xml`,
-`../work/release01-production-result.json`, `../work/release01-results.json`.
-The native GUI run separately passed 1038 assertions with Sodium, Lithium, ETF
-and EMF. Audit checks passed 4384 assertions.
+## Development source: potion death and grave recovery — 2026-10-11
 
-Production fixture: `../work/release01-modpack-release-server`. Existing pack
-isolation and network-service exclusions below still apply. Original server
-ZIPs are not a full client pack; real multiplayer latency/full-pack client play
-and heap/performance profiling are not covered. Existing known nonfatal pack
-messages, including BMarker save warnings, remain in saved logs.
-The isolated checks did not modify installed data. A subsequent authorized
-deployment installed matching 0.1 jars in Test Client and the test server, with
-RC8 backups and verified hashes in `../work/release01-deployment.json`. Existing
-templates, media and worlds were preserved.
+The supplied Universal Graves 3.13.0+26.3 saved temporary potion copies before
+the prior source's `AFTER_DEATH` cleanup. A regression reproduced this in an
+actual grave. Cleanup now precedes native death loot, so the grave captures the
+restored personal offhand and ordinary potion without any fight bottle.
+Native respawn and grave `quickEquip` recovered those personal items exactly
+once after the boss was removed. Test-only reflection uses the grave's public
+API; the release source imports no grave classes or optional dependency.
 
+All 33 native tests passed with the isolated supplied pack and without it;
+common/client compilation and 5,013 offline assertions also passed. Early pack
+JVMs stalled during shutdown after passing assertions. Their thread dumps are
+retained. The test fixture's checkpoint was occupied by its new grave, causing
+native respawn to fall back to world spawn. Using and asserting a separate
+checkpoint in the loaded test area fixed the fixture; all 33 tests passed and
+shut down normally both in the supplied pack and a narrower exact
+Graves/Lithium/Polymer run. No gameplay chunk-ticket workaround was needed.
+Existing service/Discord exclusions below still apply.
+No jar was packaged/deployed and no installed files were changed.
+
+## Recorded 0.1 results - 2026-10-10
+
+| Check | Recorded result |
+| --- | --- |
+| Server GameTests with supplied pack | 28/28 passed |
+| Server GameTests without pack | 28/28 passed |
+| Config/media audit | 4384 assertions passed |
+| Separate GUI run with Sodium, Lithium, ETF and EMF | 1038 assertions passed |
+| Packaged production jar | Readiness, spawn/activate/save/remove, normal shutdown code 0 |
+
+Reports in the original development workspace:
+
+- `../work/release01-modpack.xml`
+- `../work/release01-native.xml`
+- `../work/release01-production-result.json`
+- `../work/release01-results.json`
+
+Production fixture: `../work/release01-modpack-release-server`.
+These paths are outside version control and may be absent in a clone.
+
+The isolated checks preserved installed data. A subsequent recorded deployment
+installed matching 0.1 jars in Test Client/test server, with RC8 backups and
+verified hashes in `../work/release01-deployment.json`. Templates/media/worlds
+were preserved. This does not establish current running status.
+
+## Scope and remaining work
+
+The server ZIPs are not a full client pack. Real multiplayer latency, full-pack
+client play, heap profiling and performance benchmarks were not covered.
+The exclusions, fixture adjustments and known nonfatal messages below also
+apply to 0.1. BMarker save warnings remain in the logs.
+
+A passing suite does not mean every pack feature or external service passed.
+[Compatibility testing](COMPATIBILITY_TESTING.md) has scenarios for actual
+clients, resource packs, equipment, graves and combat integrations.
 ## Historical RC6 checks
 
 Tested on 2026-10-09 with the original `mods (1).zip` and `config.zip`.
 All 136 top-level jar hashes and all 306 original config files matched the
 provided archives before test-only overrides. Archive hashes and release results:
-`../work/rc6-modpack-results.json`. RC5 remains installed; RC6 is a local build.
+`../work/rc6-modpack-results.json`. At this point RC5 was installed and RC6 was
+a local build.
 
-## Results
+## RC6 results
 
 | Check | Result | Evidence |
 |---|---|---|
@@ -88,7 +129,7 @@ The minimal Test Client may be rejected by this pack's required networking mods.
 Use a matching client for the real multiplayer encounter. Client-only jars in
 the server archive are filtered by Fabric on dedicated-server launches.
 
-## RC6 offhand ownership safeguards
+## Offhand safeguards retained in 0.1
 
 The reusable potion now moves held contents with native `Inventory.add`, which
 consumes the input. This avoids sharing a mutable item between inventory and

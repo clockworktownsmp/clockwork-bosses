@@ -97,7 +97,13 @@ public final class ClockworkBossTargets {
             }
         }
         if (next == warden.getTarget()) return;
+        assign(warden, state, next);
+    }
 
+    /** Shared native assignment for attack rotation and burrow emergence. Keep
+     * anger/cooldown behavior identical and honor other mods' assignment vetoes. */
+    static void assign(Warden warden, ClockworkBossState state, ServerPlayer next) {
+        long generation = state.subphaseGeneration();
         var brain = warden.getBrain();
         boolean hadCooldown = brain.hasMemoryValue(MemoryModuleType.SONIC_BOOM_COOLDOWN);
         long remainingCooldown = hadCooldown ? brain.getTimeUntilExpiry(MemoryModuleType.SONIC_BOOM_COOLDOWN) : 0;
@@ -107,8 +113,10 @@ public final class ClockworkBossTargets {
         int wantedAnger = AngerLevel.ANGRY.getMinimumAnger() * 2;
         int existingAnger = warden.getAngerManagement().getActiveAnger(next);
         if (existingAnger < wantedAnger) warden.increaseAngerAt(next, wantedAnger - existingAnger, false);
+        if (!stillOwns(warden, state, generation)) return;
         warden.setAttackTarget(next);
-        if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, next, "retarget_assignment", "accepted", warden.getTarget() == next, "candidate_count", candidates.size());
+        if (!stillOwns(warden, state, generation)) return;
+        if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, next, "retarget_assignment", "accepted", warden.getTarget() == next);
         // setAttackTarget normally inserts a 200-tick first-acquisition delay.
         // Rotation must preserve the attack's own native/configured cooldown.
         if (hadCooldown) brain.setMemoryWithExpiry(MemoryModuleType.SONIC_BOOM_COOLDOWN, Unit.INSTANCE, remainingCooldown);
@@ -120,5 +128,12 @@ public final class ClockworkBossTargets {
         brain.eraseMemory(MemoryModuleType.WALK_TARGET);
         warden.getNavigation().stop();
         warden.getLookControl().setLookAt(next);
+    }
+
+    /** Native calls may invoke another mod synchronously. A removed owner or
+     * changed subphase must not receive this assignment's cooldown/navigation edits. */
+    private static boolean stillOwns(Warden warden, ClockworkBossState state, long generation) {
+        return ClockworkBossManager.stateFor(warden) == state && !state.encounterEnded()
+                && state.subphaseGeneration() == generation && warden.isAlive() && !warden.isRemoved();
     }
 }

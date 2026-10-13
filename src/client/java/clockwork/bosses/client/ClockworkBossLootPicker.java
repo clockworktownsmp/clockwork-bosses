@@ -22,6 +22,8 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static clockwork.bosses.client.ClockworkBossEditorTheme.*;
+
 /** Searchable creative-style item window inside the existing editor screen/session.
  * Native creative tabs supply categories; the All category also includes registered mod items.
  * Selecting writes an ID into the draft only: no inventory packets, item grants or file writes. */
@@ -72,20 +74,20 @@ final class ClockworkBossLootPicker {
     /** Native widgets provide keyboard activation/narration. Only a visible page owns icon widgets. */
     List<AbstractWidget> widgets(int width, int height, Runnable rebuild) {
         left = Math.max(12, (width - 704) / 2); right = width - left;
-        top = 80; bottom = height - 52;
+        top = 76; bottom = height - 42;
         int columns = Math.max(1, (right - left) / 24), rows = Math.max(1, (bottom - top) / 24);
         pageSize = columns * rows;
         pages = Math.max(1, (filtered.size() + pageSize - 1) / pageSize);
         page = Math.clamp(page, 0, pages - 1);
         var widgets = new ArrayList<AbstractWidget>();
         int cursor = searchBox == null ? query.length() : searchBox.getCursorPosition();
-        searchBox = new EditBox(font, left, 34, right - left - 72, 20, Component.literal("Search item names or namespace:item IDs"));
+        searchBox = ClockworkBossEditorTheme.input(font, left, 32, right - left - 72, Component.literal("Search item names or namespace:item IDs"));
         searchBox.setMaxLength(128); searchBox.setValue(query); searchBox.setCursorPosition(Math.min(cursor, query.length()));
         searchBox.setHint(Component.literal("Search items…"));
         searchBox.setResponder(text -> { query = text; page = 0; filter(); rebuild.run(); });
         widgets.add(searchBox);
-        widgets.add(button(right - 68, 34, 68, "Back", cancel));
-        widgets.add(button(left, 58, right - left, "Category: " + categories.get(category).name() + " ›", () -> {
+        widgets.add(button(right - 68, 32, 68, "Back", cancel));
+        widgets.add(button(left, 54, right - left, "Category: " + categories.get(category).name() + " ›", () -> {
             category = (category + 1) % categories.size(); page = 0; filter(); rebuild.run();
         }));
         for (int index = page * pageSize; index < Math.min(filtered.size(), (page + 1) * pageSize); index++) {
@@ -93,22 +95,22 @@ final class ClockworkBossLootPicker {
             int x = left + position % columns * 24, y = top + position / columns * 24;
             var icon = new Button(x, y, 22, 22, Component.literal(item.name() + " — " + item.id()), ignored -> selected.accept(item.id()), narration -> narration.get()) {
                 @Override protected void extractContents(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-                    graphics.fill(getX(), getY(), getRight(), getBottom(), isHoveredOrFocused() ? 0xFF777777 : 0xFF555555);
-                    if (isFocused()) graphics.outline(getX(), getY(), getWidth(), getHeight(), 0xFFF1F1F1);
+                    graphics.fill(getX(), getY(), getRight(), getBottom(), isHoveredOrFocused() ? SELECTED : RAISED);
+                    graphics.outline(getX(), getY(), getWidth(), getHeight(), isFocused() ? FOCUS : LINE);
                     graphics.item(item.stack(), getX() + 3, getY() + 3);
                 }
             };
             icon.setTooltip(Tooltip.create(Component.literal(item.name() + "\n" + item.id() + "\nDefault item; no extra components.")));
             widgets.add(icon);
         }
-        var previous = button(left, height - 46, 64, "Previous", () -> { page--; rebuild.run(); }); previous.active = page > 0;
-        var next = button(right - 64, height - 46, 64, "Next", () -> { page++; rebuild.run(); }); next.active = page + 1 < pages;
+        var previous = button(left, height - 34, 64, "Previous", () -> { page--; rebuild.run(); }); previous.active = page > 0;
+        var next = button(right - 64, height - 34, 64, "Next", () -> { page++; rebuild.run(); }); next.active = page + 1 < pages;
         widgets.add(previous); widgets.add(next);
         return widgets;
     }
 
-    private static Button button(int x, int y, int width, String text, Runnable action) {
-        return Button.builder(Component.literal(text), ignored -> action.run()).bounds(x, y, width, 20).build();
+    private Button button(int x, int y, int width, String text, Runnable action) {
+        return new FlatButton(font, x, y, width, CONTROL_HEIGHT, text, action);
     }
     EditBox searchBox() { return searchBox; }
     void scroll(double amount, Runnable rebuild) {
@@ -116,11 +118,11 @@ final class ClockworkBossLootPicker {
         if (next != page) { page = next; rebuild.run(); }
     }
     void background(GuiGraphicsExtractor graphics, int width, int height) {
-        graphics.fill(0, 0, width, height, 0xFF353535);
-        graphics.text(font, "Choose reward item", left, 16, 0xFFF1F1F1, false);
-        graphics.fill(left - 2, top - 2, right + 2, bottom + 2, 0xFF454545);
-        if (filtered.isEmpty()) graphics.text(font, "No matching items.", left + 8, top + 10, 0xFFF1F1F1, false);
-        graphics.centeredText(font, "Page " + (page + 1) + "/" + pages + " · " + filtered.size() + " items", width / 2, height - 40, 0xFFF1F1F1);
-        graphics.text(font, "Choose an icon. Save the template to keep your changes.", left, height - 18, 0xFFC5C5C5, false);
+        graphics.fill(0, 0, width, height, BG);
+        graphics.text(font, "Choose reward item", left, 14, BRASS, false);
+        graphics.fill(left - 2, top - 2, right + 2, bottom + 2, PANEL);
+        if (filtered.isEmpty()) graphics.text(font, "No matching items.", left + 8, top + 10, TEXT, false);
+        graphics.centeredText(font, "Page " + (page + 1) + "/" + pages + " · " + filtered.size() + " items", width / 2, height - 29, TEXT);
+        graphics.text(font, "Choose an icon. Save the template to keep your changes.", left, height - 12, MUTED, false);
     }
 }

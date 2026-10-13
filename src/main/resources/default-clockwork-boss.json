@@ -1,4 +1,5 @@
 {
+  "format_version": 1,
   "skin": {
     "type": "player",
     "name": "",
@@ -16,6 +17,15 @@
       "left_y": 7,
       "right_x": 11,
       "right_y": 7
+    },
+    "glowing_pupils": {
+      "enabled": true,
+      "scale_x": 1.0,
+      "scale_y": 1.0,
+      "left_x": -1,
+      "left_y": -1,
+      "right_x": -1,
+      "right_y": -1
     }
   },
   "spawn": {
@@ -49,19 +59,19 @@
       "file": "",
       "volume": 1.0,
       "pitch": 1.0,
-      "range": 32.0
+      "range": 0.0
     },
     "phase_change": {
       "file": "",
       "volume": 1.0,
       "pitch": 1.0,
-      "range": 32.0
+      "range": 0.0
     },
     "death": {
       "file": "",
       "volume": 1.0,
       "pitch": 1.0,
-      "range": 32.0
+      "range": 0.0
     }
   },
   "music": {
@@ -77,7 +87,7 @@
     "chance": 0.25,
     "volume": 1.0,
     "pitch": 1.0,
-    "range": 32.0
+    "range": 0.0
   },
   "targeting": {
     "switch_chance": 0.5,
@@ -118,7 +128,7 @@
         "file": "",
         "volume": 1.0,
         "pitch": 1.0,
-        "range": 32.0
+        "range": 0.0
       }
     }
   },
@@ -474,11 +484,20 @@
     "radius": 32.0
   },
   "_documentation": {
+    "format_version": "Template format revision, written automatically. Missing means legacy revision 1; unsupported revisions are rejected. Do not change it manually.",
     "skin.glowing_eyebrows": "Top-left positions of the two 4x4 slanted eyebrow masks on the 16x16 head face. Coordinates are whole pixels 0-12; move eyebrows independently from the eyes. Missing settings keep the original positions. Preview face glow is brighter for alignment; fight brightness is unchanged.",
     "skin.glowing_eyebrows.left_x": "Left eyebrow X, 0-12; default 2.",
     "skin.glowing_eyebrows.left_y": "Left eyebrow Y, 0-12; default 2. Larger values move down.",
     "skin.glowing_eyebrows.right_x": "Right eyebrow X, 0-12; default 10.",
     "skin.glowing_eyebrows.right_y": "Right eyebrow Y, 0-12; default 2.",
+    "skin.glowing_pupils": "Darker rectangles inside the eyes. Offsets start at each eye's top-left, so moving an eye also moves its pupil. -1 automatically follows the inner X or bottom Y edge. Size and position clamp to the eye. Missing settings retain the original one-pixel pupil; automatic pupils stay hidden on one-pixel-wide/high eyes.",
+    "skin.glowing_pupils.enabled": "Show darker pupils. false leaves the entire eye glow bright.",
+    "skin.glowing_pupils.scale_x": "Horizontal pupil scale, 0.5-8; 1 = one atlas pixel. Rounded to 1-8 whole pixels and clipped to eye width. Both pupils share the width.",
+    "skin.glowing_pupils.scale_y": "Vertical pupil scale, 0.5-8; 1 = one atlas pixel. Rounded to 1-8 whole pixels and clipped to eye height. X/Y sizes are independent.",
+    "skin.glowing_pupils.left_x": "Left pupil X offset inside its eye, whole number -1 to 7; -1 = automatic inner edge. 0 starts at the eye's left edge.",
+    "skin.glowing_pupils.left_y": "Left pupil Y offset inside its eye, whole number -1 to 7; -1 = automatic bottom edge. Larger values move down.",
+    "skin.glowing_pupils.right_x": "Right pupil X offset inside its eye, whole number -1 to 7; -1 = automatic inner edge. 0 starts at the eye's left edge.",
+    "skin.glowing_pupils.right_y": "Right pupil Y offset inside its eye, whole number -1 to 7; -1 = automatic bottom edge. Larger values move down.",
     "skin.glowing_eyes": "Eye positions on the 16x16 front head face, measured in Warden atlas pixels from its top-left. Default eyes are 2x2 with one darker pupil; independent X/Y scales change their size; eyebrows use their separate position settings. Use the editor skin preview to align them. These coordinates affect only marked bosses.",
     "skin.glowing_eyes.scale_x": "Horizontal eye scale, 0.5-4; 1 = two pixels wide. Rounded to whole atlas pixels (1-8) without blur. Both eyes share the width; Y scale is independent.",
     "skin.glowing_eyes.scale_y": "Vertical eye scale, 0.5-4; 1 = two pixels tall. Rounded to whole atlas pixels (1-8) without blur. Both eyes share the height; X scale is independent.",
@@ -527,7 +546,7 @@
     "voice_lines.chance": "Probability per eligible successful hit, 0-1; 0.25 = 25%. Busy voices skip the roll.",
     "voice_lines.volume": "Volume multiplier, 0-4; follows the client Hostile slider.",
     "voice_lines.pitch": "Pitch multiplier, 0.5-2; adjusts the non-overlap duration too.",
-    "voice_lines.range": "Audible distance in blocks, 1-128.",
+    "voice_lines.range": "0 = automatic arena diagonal/radius (32 without an arena); positive distance is manual, capped at 512 blocks.",
     "attacks": "Base attacks; per-phase values override them. Minecraft handles targeting and navigation.",
     "attacks.melee": "Native melee uses this base policy unless overridden by the current phase. Each attempt applies the health-selected phase before reading native damage/knockback, permission and cooldown. The current phase delay is measured from the last successful hit; blocked hits do not reset it.",
     "attacks.melee.enabled": "Allow melee. false lets enabled Sonic Boom attack inside melee reach.",
@@ -560,7 +579,7 @@
     "phases.<phase>.sounds.phase_change.file": "Entering-phase OGG filename, e.g. phase2.ogg; match exact case/spelling. null inherits; \"\" disables.",
     "phases.<phase>.sounds.phase_change.volume": "Volume multiplier, 0-4; null inherits.",
     "phases.<phase>.sounds.phase_change.pitch": "Pitch multiplier, 0.5-2; null inherits.",
-    "phases.<phase>.sounds.phase_change.range": "Audible distance in blocks, 1-128; null inherits.",
+    "phases.<phase>.sounds.phase_change.range": "0: automatic arena radius/box diagonal; positive: manual blocks, maximum 512; null inherits.",
     "phases.<phase>.melee": "Overrides attacks.melee; null/missing fields inherit. New melee attempts use this phase permission, cooldown and native attributes together.",
     "phases.<phase>.sonic_boom": "Overrides attacks.sonic_boom; null/missing fields inherit. Changes apply to the next charge; an in-progress charge keeps its start-time settings.",
     "phases.<phase>.warden_effects": "Phase glow; missing color/transition settings inherit base.",
@@ -601,15 +620,15 @@
     "sounds.spawn.file": "Exact OGG filename, e.g. boss_phase.ogg; \"\" disables.",
     "sounds.spawn.volume": "Volume multiplier, 0-4; also follows the client Hostile slider.",
     "sounds.spawn.pitch": "Pitch multiplier, 0.5-2.",
-    "sounds.spawn.range": "Audible distance in blocks, 1-128.",
+    "sounds.spawn.range": "0 = automatic arena diagonal/radius (32 without an arena); positive distance is manual, capped at 512 blocks.",
     "sounds.phase_change.file": "Exact OGG filename, e.g. boss_phase.ogg; \"\" disables.",
     "sounds.phase_change.volume": "Volume multiplier, 0-4; also follows the client Hostile slider.",
     "sounds.phase_change.pitch": "Pitch multiplier, 0.5-2.",
-    "sounds.phase_change.range": "Audible distance in blocks, 1-128.",
+    "sounds.phase_change.range": "0 = automatic arena diagonal/radius (32 without an arena); positive distance is manual, capped at 512 blocks.",
     "sounds.death.file": "Exact OGG filename, e.g. boss_phase.ogg; \"\" disables.",
     "sounds.death.volume": "Volume multiplier, 0-4; also follows the client Hostile slider.",
     "sounds.death.pitch": "Pitch multiplier, 0.5-2.",
-    "sounds.death.range": "Audible distance in blocks, 1-128.",
+    "sounds.death.range": "0 = automatic arena diagonal/radius (32 without an arena); positive distance is manual, capped at 512 blocks.",
     "boss_bar.area_effects.speed.enabled": "Enable this buff when the master switch is true.",
     "boss_bar.area_effects.speed.level": "Effect level, 1-5 (1 = I); invalid/fractional values use 1.",
     "boss_bar.area_effects.jump_boost.enabled": "Enable this buff when the master switch is true.",
@@ -669,7 +688,7 @@
     "boss_bar.visibility_area.radius": "Radius in blocks, 1-256 (default 32); used only for shape \"radius\". True 3D distance from the Warden position, not a horizontal cylinder.",
     "activation.radius": "Radius in blocks, 1-256 (default 32), used for type \"player_enter_radius\". True 3D distance from the saved emergence position; underground depth/scale does not move the trigger. Box min/max and shape are ignored in this mode.",
     "targeting": "Completed swings and fired beams count toward target rotation. Hold time and minimum attacks gate chance rolls; the maximum forces a different eligible opponent. Solo fights keep their target. Cancelled beams and disabled/cooldown-rejected swings do not count. No additional watcher.",
-    "targeting.switch_chance": "Probability 0-1 after minimum attacks/time: 0 switches only at the maximum; 1 switches at the first eligible completion. Default 0.5. The maximum forces rotation regardless of chance when an alternative exists.",
+    "targeting.switch_chance": "Chance to switch targets after the minimum attacks/time: 0% switches only at the maximum; 100% switches at the first eligible completion. Default 50%. The maximum forces rotation regardless of chance when an alternative exists.",
     "targeting.mode": "Choose nearest, random (default), or farthest alternative. Players must be inside the arena and natively eligible. Melee rotation uses follow range; ranged rotation uses the fired beam horizontal/vertical range. Unset arena uses that attack range.",
     "targeting.announcement": "Show the actual new target to that player and arena viewers. A personal warning can replace a recent audience warning about someone else. Personal warnings still share a recipient cooldown across bosses. Same-target assignments stay silent; skipped titles are not queued.",
     "targeting.announcement.enabled": "Enable dramatic target titles. This never postpones attacks or adds recovery time.",
@@ -677,7 +696,7 @@
     "targeting.announcement.cooldown_ticks": "Recipient cooldown, 20-1200 ticks; default 60. Also covers title display/fades. A new target bypasses an audience-only warning; recent personal warnings still throttle across bosses.",
     "targeting.announcement.display_ticks": "Hold title 1-100 ticks (default 20), plus 2-tick fade in and 4-tick fade out.",
     "phases.<phase>.targeting": "Per-phase target controls; null fields inherit base settings.",
-    "phases.<phase>.targeting.switch_chance": "Probability 0-1 after minimum attacks/time: 0 switches only at the maximum; 1 switches at the first eligible completion. Default 0.5. The maximum forces rotation regardless of chance when an alternative exists. null/missing inherits base.",
+    "phases.<phase>.targeting.switch_chance": "Chance to switch targets after the minimum attacks/time: 0% switches only at the maximum; 100% switches at the first eligible completion. Default 50%. The maximum forces rotation regardless of chance when an alternative exists. null/missing inherits base.",
     "phases.<phase>.targeting.mode": "Choose nearest, random (default), or farthest alternative. Players must be inside the arena and natively eligible. Melee rotation uses follow range; ranged rotation uses the fired beam horizontal/vertical range. Unset arena uses that attack range. null/missing inherits base.",
     "phases.<phase>.targeting.announcement.enabled": "Enable dramatic target titles. This never postpones attacks or adds recovery time. null/missing inherits base.",
     "phases.<phase>.targeting.announcement.text": "Literal text, at most 80 characters; <player> becomes the actual account name. Default: RUN, <player>!. No JSON formatting or commands. null/missing inherits base.",
@@ -698,7 +717,7 @@
     "attacks.roar.sound.file": "Lowercase OGG basename, no spaces or paths. Blank uses the native Warden roar; child/phase null inherits the parent sound.",
     "attacks.roar.sound.volume": "Custom roar volume, 0-4; default 1.",
     "attacks.roar.sound.pitch": "Custom roar pitch, 0.5-2; default 1.",
-    "attacks.roar.sound.range": "Custom roar hearing/delivery radius, 1-128 blocks; default 32.",
+    "attacks.roar.sound.range": "0 = automatic arena diagonal/radius (default); positive distance is manual, capped at 512 blocks. Null phase/child values inherit.",
     "phases.<phase>.subphases": "Optional 0-16 attack or recovery entries inside this health phase. Empty disables the sequence. Sequential follows file order; random shuffles every entry once per round. Recovery pauses attacks and movement. Main-phase entry/reload resets it; no nested children or health cutoffs.",
     "phases.<phase>.subphases.<subphase>": "Choose attack or recovery. Attack combat values inherit parent phase then base; recovery uses only duration_ticks. Parent health, scale, glow, aura and phase events stay unchanged. Hidden combat fields are retained when changing type in the editor.",
     "phases.<phase>.subphases.<subphase>.attacks_before_next": "Completed attacks before a roar/next subphase, whole number 1-1000; default 3. Blocked swings count; cancelled/disabled/cooldown-rejected attacks do not.",
@@ -710,7 +729,7 @@
     "phases.<phase>.roar.sound.file": "Lowercase OGG basename, no spaces or paths. Blank uses the native Warden roar; child/phase null inherits the parent sound.",
     "phases.<phase>.roar.sound.volume": "Custom roar volume, 0-4; default 1.",
     "phases.<phase>.roar.sound.pitch": "Custom roar pitch, 0.5-2; default 1.",
-    "phases.<phase>.roar.sound.range": "Custom roar hearing/delivery radius, 1-128 blocks; default 32.",
+    "phases.<phase>.roar.sound.range": "0 = automatic arena diagonal/radius (default); positive distance is manual, capped at 512 blocks. Null phase/child values inherit.",
     "phases.<phase>.subphase_order": "sequential: visit subphases in file order and cycle the roar list independently. random: run each subphase once in shuffled order, then reshuffle; pick a random roar at each transition. No immediate subphase repeats when there are at least two.",
     "phases.<phase>.roar_between_subphases": "When true and the roar list is nonempty, pause attacks and play one native roar after each subphase, including the loop boundary. False or an empty roar list skips interludes.",
     "phases.<phase>.roars": "Optional 0-16 roar sounds between subphases. Sequential cycles this list independently: one repeats, two alternate, four pair with four subphases. Random picks one per transition; roars may repeat. No missing-slot inheritance rule is needed.",

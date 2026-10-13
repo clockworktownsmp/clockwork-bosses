@@ -37,6 +37,7 @@ public abstract class WardenRendererMixin {
         visuals.clockworkBosses$setEffectColor(effectColor);
         visuals.clockworkBosses$setEyes(marker.clockworkBosses$getEyes());
         visuals.clockworkBosses$setBrows(marker.clockworkBosses$getBrows());
+        visuals.clockworkBosses$setPupils(marker.clockworkBosses$getPupils());
         visuals.clockworkBosses$setEditorPreview(false); // Only the editor may opt its detached snapshot in.
         // Start an eight-tick flash when this client observes a new transition,
         // rather than comparing unrelated server and client entity ages.

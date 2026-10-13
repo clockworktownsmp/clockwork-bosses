@@ -4,10 +4,6 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import com.google.gson.Strictness;
-import com.google.gson.stream.JsonReader;
-import com.google.gson.stream.JsonToken;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -43,16 +39,9 @@ public final class ClockworkBossTemplateDocument {
         return description(DEFAULTS.getAsJsonObject("_documentation"), path);
     }
 
-    /** Uses Gson for comments and syntax; rejects extra roots and excessive nesting. */
+    /** The same portable parser serves the mod and offline template tooling. */
     public static JsonObject read(Reader input) throws IOException {
-        JsonReader reader = new JsonReader(input);
-        reader.setStrictness(Strictness.LENIENT);
-        reader.setNestingLimit(32);
-        JsonElement value = JsonParser.parseReader(reader);
-        if (!value.isJsonObject() || reader.peek() != JsonToken.END_DOCUMENT) {
-            throw new IOException("Template must contain exactly one JSON object");
-        }
-        return value.getAsJsonObject();
+        return ClockworkBossTemplateFormat.read(input);
     }
 
     /** Groups field notes above their section, leaving its values together for editing. */
@@ -62,11 +51,12 @@ public final class ClockworkBossTemplateDocument {
             config.getAsJsonObject("_documentation").entrySet()
                     .forEach(entry -> documentation.add(entry.getKey(), entry.getValue()));
         }
+        documentActions(config, documentation);
         StringBuilder output = new StringBuilder("// Clockwork Boss template: JSON with comments. 20 game ticks = 1 second.\n"
                 + "// Null phase overrides inherit base values; subphase overrides inherit their parent phase.\n"
                 + "// Empty sound filenames disable events; an empty roar filename uses the vanilla roar.\n"
                 + "// /boss reload applies edited settings to loaded bosses.\n");
-        appendObject(output, config, documentation, "", 0);
+        appendObject(output, ClockworkBossTemplateFormat.forSave(config), documentation, "", 0);
         return output.append('\n').toString();
     }
 
@@ -75,8 +65,9 @@ public final class ClockworkBossTemplateDocument {
                                      JsonObject docs, String path, int depth) {
         if (depth > 32) throw new IllegalArgumentException("Template nesting exceeds 32 levels");
         output.append("{\n");
-        var fields = object.entrySet().stream()
-                .filter(entry -> !entry.getKey().equals("_documentation")).toList();
+        // Root transport metadata was removed by forSave. Nested names belong
+        // to their addon and must never be filtered by the comment writer.
+        var fields = object.entrySet().stream().toList();
         for (int index = 0; index < fields.size(); index++) {
             Map.Entry<String, JsonElement> entry = fields.get(index);
             String fieldPath = path.isEmpty() ? entry.getKey() : path + "." + entry.getKey();
@@ -130,6 +121,40 @@ public final class ClockworkBossTemplateDocument {
             remaining = remaining.substring(split).stripLeading();
         }
         output.append(indent).append("// ").append(remaining).append('\n');
+    }
+
+    /** Action field comments come from the registered schema, just like the GUI.
+     * Unknown addon fields remain intact when the addon is temporarily absent. */
+    private static void documentActions(JsonObject config, JsonObject docs) {
+        docs.addProperty("phases.<phase>.subphases.<subphase>.type",
+                "Registered action ID, such as clockwork_bosses:burrow. Legacy attack/recovery names remain supported.");
+        var phases = config.get("phases");
+        if (phases == null || !phases.isJsonObject()) return;
+        var catalog = clockwork.bosses.api.BossActionRegistry.types();
+        for (var phase : phases.getAsJsonObject().entrySet()) {
+            if (!phase.getValue().isJsonObject()) continue;
+            var children = phase.getValue().getAsJsonObject().get("subphases");
+            if (children == null || !children.isJsonObject()) continue;
+            for (var child : children.getAsJsonObject().entrySet()) {
+                if (!child.getValue().isJsonObject()) continue;
+                var type = child.getValue().getAsJsonObject().get("type");
+                if (type == null || !type.isJsonPrimitive() || !type.getAsJsonPrimitive().isString()) continue;
+                net.minecraft.resources.Identifier id;
+                try { id = ClockworkBossActions.resolve(type.getAsString()); }
+                catch (IllegalArgumentException invalid) { continue; }
+                var action = catalog.get(id); if (action == null) continue;
+                String prefix = "phases." + phase.getKey() + ".subphases." + child.getKey() + ".action_settings";
+                docs.addProperty(prefix, action.help() + " Missing/null fields use the declared defaults.");
+                for (var field : action.settings()) {
+                    String limits = switch (field.kind()) {
+                        case NUMBER -> (field.integer() ? " Whole number " : " Number ") + field.min() + " to " + field.max() + ".";
+                        case BOOLEAN -> " true or false.";
+                        case TEXT -> field.choices().isEmpty() ? " Up to " + field.maxLength() + " characters." : " Options: " + String.join(", ", field.choices()) + ".";
+                    };
+                    docs.addProperty(prefix + "." + field.key(), field.help() + limits + " Default: " + JSON.toJson(field.defaultValue()) + ".");
+                }
+            }
+        }
     }
 
     /** Four phase objects share the same field descriptions through a catalog wildcard. */

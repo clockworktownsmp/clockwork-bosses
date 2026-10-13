@@ -49,6 +49,12 @@ public final class ClockworkBossFightPotion {
         UseItemCallback.EVENT.register((player, level, hand) -> {
             ItemStack stack = player.getItemInHand(hand);
             if (!isPotion(stack)) return InteractionResult.PASS;
+            // A grave made by an older build can return a saved bottle after
+            // its grant ended. Remove it on attempted use rather than scanning
+            // other mods' containers or adding a recurring inventory check.
+            if (player instanceof ServerPlayer serverPlayer && !PLAYERS.containsKey(player.getUUID())) {
+                clearBottles(serverPlayer, false); return InteractionResult.FAIL;
+            }
             if (!owned(stack, player.getUUID()) || player.getCooldowns().isOnCooldown(stack)) return InteractionResult.FAIL;
             if (player instanceof ServerPlayer serverPlayer && available(serverPlayer) == null) return InteractionResult.FAIL;
             return InteractionResult.PASS;
@@ -70,8 +76,9 @@ public final class ClockworkBossFightPotion {
     }
 
     public static boolean isPotion(ItemStack stack) {
+        if (stack.isEmpty() || !stack.is(Items.POTION)) return false;
         CustomData data = stack.get(DataComponents.CUSTOM_DATA);
-        return !stack.isEmpty() && stack.is(Items.POTION) && data != null && data.copyTag().getBooleanOr(MARKER, false);
+        return data != null && data.copyTag().getBooleanOr(MARKER, false);
     }
     private static boolean owned(ItemStack stack, UUID player) {
         return isPotion(stack) && player.toString().equals(stack.get(DataComponents.CUSTOM_DATA).copyTag().getStringOr(OWNER, ""));
@@ -219,6 +226,24 @@ public final class ClockworkBossFightPotion {
     public static void releaseBoss(UUID boss) {
         for (Member member : List.copyOf(PLAYERS.values())) leave(boss, member.player.getUUID());
     }
+    /** Explicit removal also cleans copied/restored bottles whose original
+     * membership no longer exists. This one-time inventory pass runs on the
+     * command thread; it never polls, touches world containers, or removes a
+     * bottle still granted by another encounter. */
+    public static void clearOrphanedBottles(net.minecraft.server.MinecraftServer server) {
+        for (ServerPlayer player : server.getPlayerList().getPlayers())
+            if (!PLAYERS.containsKey(player.getUUID())) clearBottles(player, false);
+    }
+    /** A committed player death must release the temporary bottle BEFORE native
+     * death loot runs: grave mods capture inventory there, before AFTER_DEATH.
+     * Restore only the unchanged live offhand item, so the grave saves the
+     * player's real inventory. All this player's overlapping grants end; the
+     * later membership/respawn callbacks are harmless after this first release.
+     * An untracked copy is also cleared, without syncing unaffected players. */
+    public static void beforeDeathDrops(ServerPlayer player) {
+        if (PLAYERS.containsKey(player.getUUID())) releasePlayer(player.getUUID());
+        else clearBottles(player, false);
+    }
     public static void releasePlayer(UUID player) {
         Member member = PLAYERS.remove(player);
         if (member == null) return;
@@ -252,12 +277,22 @@ public final class ClockworkBossFightPotion {
     /** Event-boundary inventory cleanup only. Containers in the world are not
      * scanned; any stored copy remains owner-locked and unusable outside a fight. */
     private static void clearBottles(ServerPlayer player) {
-        if (isPotion(player.getUseItem())) player.stopUsingItem();
+        clearBottles(player, true);
+    }
+    private static void clearBottles(ServerPlayer player, boolean forceSync) {
+        boolean changed = isPotion(player.getUseItem());
+        if (changed) player.stopUsingItem();
         var inventory = player.getInventory();
         for (int slot = 0; slot < inventory.getContainerSize(); slot++)
-            if (isPotion(inventory.getItem(slot))) inventory.setItem(slot, ItemStack.EMPTY);
-        if (isPotion(player.containerMenu.getCarried())) player.containerMenu.setCarried(ItemStack.EMPTY);
-        sync(player);
+            if (isPotion(inventory.getItem(slot))) { inventory.setItem(slot, ItemStack.EMPTY); changed = true; }
+        if (isPotion(player.containerMenu.getCarried())) { player.containerMenu.setCarried(ItemStack.EMPTY); changed = true; }
+        if (!changed && !forceSync) return; // Orphan scan sends nothing to unaffected players.
+        // Prediction and previous inventory transactions can leave the client's
+        // visible stack different from the menu's remote-slot cache. A delta
+        // alone cannot correct that state. Send Minecraft's authoritative full
+        // inventory at this lifecycle boundary, including offhand and cursor.
+        player.inventoryMenu.broadcastFullState();
+        if (player.containerMenu != player.inventoryMenu) player.containerMenu.broadcastFullState();
     }
     private static void sync(ServerPlayer player) {
         player.inventoryMenu.broadcastChanges();
