@@ -214,7 +214,7 @@ public final class WardenEmissiveMaskTexture {
     }
 
     /**
-     * Face-only mask: independently positioned slanted brows and crisp rectangular eyes.
+     * Face-only mask: positioned/rotated expression brows and crisp rectangular eyes.
      * Coordinates and dimensions are normalized before drawing, keeping every pixel on
      * the 16x16 face. The preview uses opaque brows; live brows retain their original alpha.
      * Only marked bosses use these masks; base skins and ordinary Wardens are untouched.
@@ -249,15 +249,12 @@ public final class WardenEmissiveMaskTexture {
         }
 
         var brows = clockwork.bosses.ClockworkBossBrows.unpack(browCoordinates);
-        // Each brow is two 2x2 blocks in a 4x4 envelope, sloping toward the face center.
+        // Geometry comes from the shared bounded pose. Rotated pixels are already
+        // clipped to the face, so they cannot illuminate neighboring atlas parts.
         for (int brow = 0; brow < 2; brow++) {
-            int left = WARDEN_HEAD_FRONT_X + (brow == 0 ? brows.leftX() : brows.rightX());
-            int top = WARDEN_HEAD_FRONT_Y + (brow == 0 ? brows.leftY() : brows.rightY());
-            for (int block = 0; block < 2; block++) {
-                int offsetX = (brow == 0 ? block : 1 - block) * 2;
-                for (int dy = 0; dy < 2; dy++) for (int dx = 0; dx < 2; dx++)
-                    mask.setPixel(left + offsetX + dx, top + block * 2 + dy, preview ? 0xFFFFFFFF : 0x90FFFFFF);
-            }
+            for (int pixel : brows.facePixels(brow == 1))
+                mask.setPixel(WARDEN_HEAD_FRONT_X + (pixel & 15), WARDEN_HEAD_FRONT_Y + (pixel >>> 4),
+                        preview ? 0xFFFFFFFF : 0x90FFFFFF);
         }
         // Draw each scaled eye at its independent position. Neutral gray multiplies the
         // current phase tint into a darker shade, without forcing a different hue.

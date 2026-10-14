@@ -9,7 +9,8 @@
   "license": "MIT",
   "environment": "*",
   "custom": {
-    "clockwork_bosses:api_revision": 1
+    "clockwork_bosses:api_revision": 1,
+    "clockwork_bosses:workshop_build_channel": "${workshop_build_channel}"
   },
   "entrypoints": {
     "main": [

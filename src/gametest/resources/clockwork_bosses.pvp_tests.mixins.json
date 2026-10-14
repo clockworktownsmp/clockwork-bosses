@@ -1,0 +1,6 @@
+{
+  "required": true,
+  "package": "clockwork.bosses.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": ["PvpProjectileProbe", "PvpSweepProbe"]
+}

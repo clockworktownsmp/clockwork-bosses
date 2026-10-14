@@ -3,6 +3,183 @@
 Use this checklist before putting the current build into an arena your players will use.
 Current checks appear first; dated sections below retain earlier release evidence.
 
+## Publish autocomplete — prepared 0.3.0-beta.5, 2026-10-13
+
+Common/client compilation and jar/source packaging succeed. No regression
+tests or native game tests were added/run for this change. Source review shows
+the callback runs only after a successful publication, on the existing file
+worker. It updates one validated template name under the shared file-writer
+monitor and publishes a sorted immutable snapshot for autocomplete. Save draft
+does not call it. Current encounters retain their config snapshots; future
+spawns continue to read disk normally. Failed notification reports publication
+success with `template_index_refreshed=false`, leaving manual reload available.
+
+The website/documentation notice is: **Run `/boss reload` to apply these changes
+to bosses that are already spawned.** Legacy `reload_required=true` remains
+valid for that purpose. Mod/website installation and beta.5 compatibility
+declaration have not been performed; published beta.4/0.2.0 remain unchanged.
+
+## Beta website publication — 0.3.0-rc.1, 2026-10-13
+
+Beta declares exact support for mod 0.3.0-beta.4 and legacy 0.2.0, independently
+of its website version. All 29 public beta file hashes match the tested capture;
+root/scoped metadata GET/HEAD succeed. Foreign origins, invalid relay proofs and
+private assets remain denied. Production's version and all 27 pre/post file
+hashes are unchanged. No dev deployment, mod jar, server setting or credential
+change was made.
+
+The exact beta.4 jar's normal Java HTTP client reads public beta metadata and
+reports compatible/writable. Against that actual declaration, 23 loopback API
+assertions pass for owner/CSRF/origin/session isolation, exact JSON edits,
+validated OGG upload, publication, withdrawn compatibility and revoked owner
+permissions. The unchanged released0.2.0 API and current browser SDK's legacy,
+autosave, catalog and upload paths pass; the captured website has 27 SDK/relay
+contract tests. Public browser rendering was checked by the website owner.
+Real Minecraft-account/cloud relay editing and publishing remain playtest work;
+the earlier workerd/SQLite restriction was not bypassed. The native Minecraft
+results below are historical, not a new game run for this website release.
+
+## Beta host selection — 0.3.0-beta.4 preview, 2026-10-13
+
+The packaged channel is explicitly beta, selecting `https://beta.clockworkboss.com`
+for new build-channel configurations. Existing explicit URLs remain pinned;
+`testing_channel=beta` deliberately overrides them with a separate identity.
+The build and all 14 Workshop suites pass, including 62 channel assertions and
+5,257 core audit assertions. Jar metadata and shared browser/relay selection
+were checked. Gameplay code is unchanged; the native results below are from
+beta.3, not a new beta.4 Minecraft run. No deployment, hosted login, server
+setting changes, credential migration or website compatibility declaration
+was performed. Current beta supports only mod 0.2.0, so this preview remains
+read-only there until tested support is explicitly declared.
+
+## Workshop channels — 0.3.0-beta.3 preview, 2026-10-13
+
+- Full common/client build, 5,257 audits, file-worker checks and all **14**
+  workshop suites pass. The new channel suite has **59** assertions for explicit
+  build selection, legacy/pinned/custom URLs, independent identities, origin
+  binding, no version-suffix inference, metadata/size/redirect checks, exact
+  supported versions/capabilities and authenticated read-only/mutation gates.
+- All **47 required native server GameTests** pass; gameplay/PvP code is unchanged.
+- The **actual unchanged released 0.2.0 jar** runs the owner/CSRF/draft/download/
+  publish regression in a separate Java classpath without new metadata. This is
+  released API code with disposable HTTP/storage fixtures, not Minecraft account
+  login or a hosted-cloud end-to-end test.
+- Canonical browser checks pass for web0.2.1/mod0.2.0, empty dev allowlists,
+  wrong origins/channels, missing/invalid/oversized metadata, read-only recovery,
+  logout, autosave and a compatibility change immediately before raw XHR upload.
+  Existing actual SDK autosave, item-catalog and sound-upload regressions pass.
+
+Current beta declares only 0.2.0; dev declares none. A new 0.3.0-beta.3 connection
+there is correctly read-only until explicit compatible site publication. Browser
+source/dev assets are prepared only. Captured release manifests and 0.2.0/0.2.1
+website bytes are unchanged. No live/test settings, keys, deployments, commits or
+pushes are changed. Live cloud/real-account login, pixel GUI checks, latency and
+TLS/cloud relay end-to-end were not performed; the documented Windows
+workerd/SQLite restriction was not bypassed.
+
+## Better Combat compatibility — 0.3.0-beta.2 preview, 2026-10-12
+
+Exact environment: Minecraft 26.3, Java 25.0.4, Loader 0.19.5, Fabric API
+0.161.0+26.3, Gradle 9.7.0 and Loom 1.18.2. Optional fixtures contain Better
+Combat 3.2.2+26.3-fabric, Cloth Config 26.3.158 and Player Animation Library
+1.2.8+mc.26.3. The official Better Combat artifact's checksum and actual bytecode
+were checked; no older branch was substituted for its implementation.
+
+- **54 required native dedicated-server tests pass with Better Combat:** the
+  existing 47 plus seven compatibility cases. Backing offhand occupancy,
+  two-handed hiding, full inventory, normal main-hand drinking, interruption,
+  reuse, owner/arena gates, shared cooldown, dual-wielding, weapon swaps, death
+  and exit cleanup pass. The original placement failed the hidden-shield test
+  before correction; personal equipment now stays in place throughout.
+- Better Combat's actual server request handler commits native boss damage once
+  per hit at tested attack speeds, increases damage for a falling crit, respects
+  scaled hitboxes/range and crosses a health phase without replaying damage.
+  Protected melee/multi-target swings preserve health/velocity and reject Fire
+  Aspect while still damaging a mob. Existing PvP production hooks are unchanged.
+- **54 required tests also pass with Better Combat and Lithium 0.26.2 together.**
+  One earlier combined run had an intermittent fixed-box overlap failure; its
+  diagnostic rerun passed before any gameplay change. The fixture now moves the
+  boss vertically in the same loaded chunk and explicitly asserts it is still
+  loaded/alive, keeping the test focused on fixed geometry rather than unload.
+- **47 required native tests pass without Better Combat.** The full offline
+  build passes 5,257 audit assertions, bounded file-worker checks, all thirteen
+  workshop suites and 644 portable contract assertions. Required tests are not
+  skipped. Development-only `doTick()` calls advance embedded players; none are
+  added to gameplay or packaged into the core jar.
+- The native client recheck with Sodium 0.9.2, Lithium 0.26.2, EMF 3.3.11 and
+  ETF 7.2.5 passes 2,700 model comparisons and 65,536 emissive pixel checks.
+  This client fixture does not install Better Combat or test its input/animations.
+- The exact packaged jar boots dedicated servers without and with Better
+  Combat. Native create/spawn/activate/reload/remove and clean shutdown pass.
+  Disabled/unavailable workshop relay, byte-preserving fixture migration and
+  old-companion rejection also pass. The matching example addon is 0.1.5,
+  pinned to this core preview; no test or Better Combat dependency jar is bundled.
+
+An intermittent existing item-catalog test expired after 300 accelerated ticks
+in 34 ms while its worker was still pending. The fixture now briefly yields
+and retains a bounded wait; production batching and its real deadlines are
+unchanged. No required test is bypassed or assertion removed.
+
+The minimal optional adapter queries selected-weapon hand availability at
+potion grant/refresh only. Typed Better Combat references are isolated; no
+required runtime dependency or bundled Better Combat jar is added. There is no
+new combat callback, scheduler, attack AI or public API extension.
+
+Native tests use embedded players and real server methods. They do not verify
+real client input/animations, actual multiplayer login, latency/loss, full live
+modpack play, graves with Better Combat or Combat Roll. Better Combat's exact
+configuration-task code requires its own client channel; Clockwork itself stays
+client optional. See [the detailed test recipe and short multiplayer checklist](BETTER_COMBAT_TESTING.md).
+No installed server/client, website, Git commit/push or release tag is changed.
+The local `dev` branch retains uncommitted work; `main` and `v0.2.0` stay at the
+existing release snapshot.
+
+## Encounter PvP protection — 0.3.0-beta.1 preview, 2026-10-12
+
+Per-template `boss_bar.pvp_protection.enabled` blocks player-caused damage and
+new harmful effects in both directions when either player is inside a protected
+active encounter. Native boss/environmental/self harm and helpful buffs/healing
+remain. Starts at activation, including emergence; fresh geometry handles exit,
+reload, end/removal and overlapping arenas without another tick watcher.
+New files explicitly opt in; absent/null legacy settings remain disabled.
+
+Verified in isolated fixtures:
+
+- Full Java 25 / Gradle 9.7.0 / Loom 1.18.2 offline build, common/client/test
+  compilation, **5,257** core audit assertions, bounded file-worker checks and
+  all thirteen workshop suites pass.
+- **47 required native 26.3 GameTests** pass with and without Lithium
+  0.26.2+mc26.3. Seven PvP cases cover native melee/sweeps, flaming/tipped arrows,
+  splash healing/poison/instant harm, lingering poison clouds with mob positive
+  controls, sourced harmful/helpful/boss effects, authorized effect commands,
+  TNT damage/independent knockback, owner logout/save/read/reassignment,
+  activation/exit/reload/removal, box/radius/overlap/end, nested effect-scope
+  exception cleanup, and Channeling versus natural lightning.
+- Independent schema checks pass: both exports valid, 16 accepted and 12
+  rejected fixtures; portable contract export has 644 assertions. The separate
+  browser candidate passes 31 schema/default/legacy/null/preset/round-trip checks
+  and JavaScript syntax checks. Its new control is not published to Cloudflare.
+- Disposable client boot with Sodium 0.9.2, Lithium 0.26.2, EMF 3.3.11 and
+  ETF 7.2.5 passes 2,700 native model comparisons and 65,536 emissive pixel checks.
+- The exact packaged preview boots with workshop disabled and with an unavailable
+  TLS relay. Native create/spawn/activate/reload/remove, fixture migration and
+  clean shutdown pass. Loader still rejects an old companion before initialization.
+  Jar metadata, all compiled class bytes, generated schema, test/private-asset
+  exclusions and SHA-256 are verified; the matching example addon is 0.1.4.
+
+The first native run exposed a Mixin multi-target shadow-remapping restriction;
+the exact unobfuscated 26.3 field now declares no remapping. Tests also reset
+native hurt cooldowns between immediate assertions. No ignored mixin error or
+required-test failure remains. Native lightning's source-less damage path was
+guarded at `thunderHit`, where its Channeling cause is still available.
+
+Pre-existing effects are not purged; unowned fire/lava/placed-block hazards remain
+environmental. Unknown addon damage/effects need native attribution. Multiplayer
+with unmodded clients, latency/loss, Better Combat/Combat Roll and the full live
+pack remains manual. No TPS/heap benchmark or rendered GUI-layout test was run.
+No live/test server or client jar was replaced, server restarted, website
+published, or Git commit/push made. The 0.2.0 checkpoint remains separate.
+
 ## 0.2.0 release and moving melee wind-up — 2026-10-12
 
 Reproduced the reported cancellation before the fix: the new native movement
@@ -1215,3 +1392,75 @@ User agreed to automatic arena sizing. follow_range=0 resolves to moving-radius 
 Java 25 / Gradle 9.7.0 / Loom 1.18.2 offline compileJava compileClientJava succeeded after the final changes. This also compiled the pending saturated-preview refinement. No tests, game launches, packaging or deployment were performed. Installed jars remain Preview.23; next packaged version should be Preview.24. Runtime targeting/alerts/visual confirmation remains outstanding.
 
 </details>
+
+## Darkness settings investigation — 2026-10-13
+
+The reported phase-one mismatch was traced to rejected Workshop operations, not
+incorrectly compiled aura fields. Save draft reported an active-revision conflict;
+Publish then reported that the active template changed since the draft was saved.
+Native spawn/area edits had changed the active document. Read-only direct remote
+checks confirmed both the saved draft and active template retained their prior
+Darkness values. No live files, jars, credentials or settings were changed.
+
+Added six required native Minecraft 26.3 GameTests: separate active/dormant values,
+configured short-duration gaps and deadlines, the reported 100-block/150-100-tick
+interval/100-150-tick duration overrides, dormant watcher application, configuration
+transition/disable behavior, and 3D range/spectator/stronger-effect handling.
+All 53 required native tests passed after isolating the new timing fixtures in
+separate native test environments. Initial parallel runs failed because other
+fixtures reset the shared manager and overlapping auras contaminated timing;
+no production change or skipped assertion was used to address those fixture failures.
+
+Java 25/Gradle offline check also passed, including 5,257 audit assertions and
+an added real file-store/live-schema save -> publish -> compiled-settings check
+that preserves the exact requested Darkness fields. Existing writer-conflict
+checks still reject stale publication and preserve newer native edits.
+
+Production aura code, scan frequency and released 0.2.0 artifacts remain unchanged.
+The separate Workshop chat owns the local frontend publication/error safeguards;
+public deployment is a separate step. Actual client rendering and a successful
+owner-authenticated live recovery/retest have not been verified in this run.
+Evidence: ../work/darkness-native-isolated.log and ../work/darkness-contract-check.log.
+
+Coordinated frontend verification: the final local SDK/DOM/relay regression log
+reports 49 passing checks with no failures/skips. Safeguards bind publication to
+an actually saved/reviewed document and recheck edits/session/revision at commit;
+failed saves revoke stale approval. Active-revision conflicts have prominent,
+operation-specific recovery messages, with no automatic rebase/overwrite.
+Actual phase numeric-input -> export/Save-body checks retain the requested aura
+values in both canonical and frozen production frontend fixtures. Loopback
+browser rendering of the prepared fix was unavailable; no live site was deployed.
+
+## Eyebrow expressions and rotation — development source, 2026-10-13
+
+Added Angry, Neutral, Curious and Sad presets with independent left/right
+rotation in whole degrees from -45 to 45. Shape changes preserve positions;
+Reset restores selected positions and zero rotation without changing expression.
+The native preview and spawned-boss renderer use the same bounded rasterizer.
+Old templates and callers keep the original angry face with zero rotation.
+
+The existing eyebrow metadata integer now carries the pose; no new data accessor,
+packet type, watcher, timer or AI is added. Both native and website editors consume
+the exported shared definitions. All seven bundled presets include the default pose.
+
+Optional event rules choose poses at existing melee/sonic visual start and
+recovery, native roar start/stop, actual target changes and Fabric AFTER_DAMAGE.
+The damage observer accepts nonfatal player-owned damage, not vetoed attempts,
+fatal hits or environmental hazards. Hit priority temporarily overrides an attack,
+then restores it only if still active. Independent hit/target cooldowns bound
+reaction churn. Random resting faces roll once on completed swings/beams; cancelled
+attempts do not roll. Captured tokens make old stop callbacks harmless across
+reload/replacement. Existing ten-tick loaded-boss visits expire poses (up to nine
+extra game ticks), synchronizing the integer only when it changes. No new world
+query, client timer, damage operation or animation implementation is introduced.
+
+Missing/disabled rules keep the old static look. Reload and phase changes clear
+transient poses; encounter cleanup also works without a loaded entity. Both editors
+offer still previews with deterministic pool samples, without changing saved rules.
+
+Java 25 / Minecraft 26.3 / Loom 1.18.2 offline compileJava, compileClientJava and
+generateWorkshopSchema completed successfully. No tests or game launches were
+requested or run. Native GUI scales, rotated glow in-world, resource reload and
+multiple-boss rendering and event priority/cooldown/interruption behavior still
+need playtesting. No jar was packaged or deployed,
+and the hosted stable/beta sites and installed server/client files are unchanged.

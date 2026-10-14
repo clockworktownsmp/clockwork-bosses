@@ -101,16 +101,28 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
     @Unique private int clockworkBosses$lastMeleeDelay, clockworkBosses$attemptCooldown, clockworkBosses$attemptRecovery;
     @Unique private String clockworkBosses$observedMeleeVisual;
     @Unique private clockwork.bosses.ClockworkBossMeleeVisual clockworkBosses$cachedMeleeVisual;
+    // Captured server pose tokens prevent an old finish/cancel clearing a newer
+    // expression. They carry no player/entity references and are not synced.
+    @Unique private long clockworkBosses$meleeFaceToken, clockworkBosses$sonicFaceToken;
     @Override public void clockworkBosses$beginMeleeVisual(long now, int charge, int recovery) {
         ((Warden) (Object) this).getEntityData().set(clockworkBosses$MELEE_VISUAL,
                 new clockwork.bosses.ClockworkBossMeleeVisual(now, charge, recovery, -1).encode());
+        clockworkBosses$meleeFaceToken = ClockworkBossManager.beginFaceAttack((Warden) (Object) this,
+                clockwork.bosses.ClockworkBossFaceEvents.Attack.MELEE, now, charge + recovery + 10);
     }
     @Override public void clockworkBosses$finishMeleeVisual(long now) {
         var data = ((Warden) (Object) this).getEntityData();
         var visual = clockwork.bosses.ClockworkBossMeleeVisual.decode(data.get(clockworkBosses$MELEE_VISUAL));
-        if (visual != null) data.set(clockworkBosses$MELEE_VISUAL, visual.hit(now).encode());
+        if (visual != null) {
+            data.set(clockworkBosses$MELEE_VISUAL, visual.hit(now).encode());
+            ClockworkBossManager.finishFaceAttack((Warden) (Object) this, clockworkBosses$meleeFaceToken, now, visual.recoveryTicks());
+        }
     }
-    @Override public void clockworkBosses$clearMeleeVisual() { ((Warden) (Object) this).getEntityData().set(clockworkBosses$MELEE_VISUAL, ""); }
+    @Override public void clockworkBosses$clearMeleeVisual() {
+        ((Warden) (Object) this).getEntityData().set(clockworkBosses$MELEE_VISUAL, "");
+        ClockworkBossManager.cancelFaceAttack((Warden) (Object) this, clockworkBosses$meleeFaceToken);
+        clockworkBosses$meleeFaceToken = 0;
+    }
     @Override public long clockworkBosses$meleeVisualMillis(long now, float partial) {
         String text = ((Warden) (Object) this).getEntityData().get(clockworkBosses$MELEE_VISUAL);
         if (!text.equals(clockworkBosses$observedMeleeVisual)) {
@@ -207,13 +219,20 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
     @Override public void clockworkBosses$beginSonicVisual(long now, int duration, int recoveryTicks) {
         var visual = new ClockworkBossChargeVisual(++clockworkBosses$shotSequence, now, duration, -1, recoveryTicks);
         ((Warden) (Object) this).getEntityData().set(clockworkBosses$SONIC_VISUAL, visual.encode());
+        clockworkBosses$sonicFaceToken = ClockworkBossManager.beginFaceAttack((Warden) (Object) this,
+                clockwork.bosses.ClockworkBossFaceEvents.Attack.SONIC_BOOM, now, duration + recoveryTicks + 10);
     }
     @Override public void clockworkBosses$finishSonicVisual(long now) {
         var visual = ClockworkBossChargeVisual.decode(clockworkBosses$getSonicVisual());
-        if (visual != null) ((Warden) (Object) this).getEntityData().set(clockworkBosses$SONIC_VISUAL, visual.fired(now).encode());
+        if (visual != null) {
+            ((Warden) (Object) this).getEntityData().set(clockworkBosses$SONIC_VISUAL, visual.fired(now).encode());
+            ClockworkBossManager.finishFaceAttack((Warden) (Object) this, clockworkBosses$sonicFaceToken, now, visual.recoveryTicks());
+        }
     }
     @Override public void clockworkBosses$clearSonicVisual() {
         ((Warden) (Object) this).getEntityData().set(clockworkBosses$SONIC_VISUAL, "");
+        ClockworkBossManager.cancelFaceAttack((Warden) (Object) this, clockworkBosses$sonicFaceToken);
+        clockworkBosses$sonicFaceToken = 0;
     }
     @Override public long clockworkBosses$sonicVisualMillis(long now, float partialTick) {
         String value = clockworkBosses$getSonicVisual();

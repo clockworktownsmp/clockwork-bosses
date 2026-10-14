@@ -14,7 +14,13 @@
     "ServerPlayerDataMixin",
     "BrainRecoveryMixin",
     "BossLootMixin",
-    "TemporaryActionEntityMixin"
+    "TemporaryActionEntityMixin",
+    "PlayerHarmSourceMixin",
+    "PvpProjectileMixin",
+    "PvpCloudMixin",
+    "PvpEffectMixin",
+    "PvpExplosionMixin",
+    "PvpLightningMixin"
   ],
   "injectors": {
     "defaultRequire": 1

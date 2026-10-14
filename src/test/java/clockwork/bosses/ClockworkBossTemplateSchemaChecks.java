@@ -68,6 +68,13 @@ public final class ClockworkBossTemplateSchemaChecks {
         JsonObject phase = nullable.getAsJsonObject("phases").getAsJsonObject("annoyed");
         phase.add("subphase_order", JsonNull.INSTANCE); phase.add("roar_between_subphases", JsonNull.INSTANCE);
         fixture(folder, "valid/runtime-nulls.json", nullable);
+        nullable.getAsJsonObject("boss_bar").add("pvp_protection", JsonNull.INSTANCE);
+        fixture(folder, "valid/pvp-null-section.json", nullable);
+        var pvp = new JsonObject(); pvp.add("enabled", JsonNull.INSTANCE);
+        nullable.getAsJsonObject("boss_bar").add("pvp_protection", pvp);
+        fixture(folder, "valid/pvp-null-enabled.json", nullable);
+        pvp.addProperty("enabled", "true");
+        fixture(folder, "invalid/pvp-string-boolean.json", nullable);
         fixture(folder, "valid/omitted-legacy.json", JsonParser.parseString("{\"loot\":{\"loot_table\":\"minecraft:entities/warden\"}}").getAsJsonObject());
         JsonObject roar = ClockworkBossTemplateDocument.defaults(), roarChild = ClockworkBossEditorSchema.newSubphase();
         roarChild.addProperty("type", ClockworkBossActions.ROAR.toString()); JsonObject roarSettings = new JsonObject();

@@ -118,7 +118,7 @@ public final class ClockworkBossTemplateStore {
      * boss-presets is never scanned for gameplay or suggestions;
      * no JSON parse or scan is needed on each suggestion request.
      */
-    public static void refreshCache() throws Exception {
+    public static synchronized void refreshCache() throws Exception {
         ensureDirectory();
         try (var stream = Files.list(DIRECTORY)) {
             cachedTemplates = stream
@@ -140,6 +140,20 @@ public final class ClockworkBossTemplateStore {
                     .filter(name -> regularOwnedFile(PRESET_DIRECTORY.resolve(name).resolve("template.json")))
                     .sorted().toList();
         }
+    }
+
+    /** Adds a successfully published template to the immutable autocomplete
+     * snapshot. The web file worker calls this after committing JSON/media;
+     * checking one owned file avoids rescanning every template/preset per publish.
+     * The shared writer monitor also prevents an in-flight full refresh from
+     * overwriting this update. Existing encounters keep their config snapshots;
+     * future spawns already load their document from disk through load(). */
+    public static synchronized void publishedTemplate(String templateName) throws IOException {
+        validateName(templateName);
+        if (!exists(templateName)) throw new IOException("Published template is unavailable for command suggestions");
+        var names = new java.util.TreeSet<>(cachedTemplates);
+        names.add(templateName);
+        cachedTemplates = List.copyOf(names);
     }
 
     /** A snapshot supplies preset completion without a directory scan while the player types. */

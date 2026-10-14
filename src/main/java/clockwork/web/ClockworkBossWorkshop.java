@@ -127,13 +127,16 @@ public final class ClockworkBossWorkshop implements DedicatedServerModInitialize
     private void start(MinecraftServer server) {
         stop(); onlineMode = server.usesAuthentication();
         Path config = FabricLoader.getInstance().getConfigDir();
+        final WorkshopRelease.Mod release;
+        try { release = WorkshopRelease.installed(); }
+        catch (IOException invalid) { LOG.error("Workshop release metadata unavailable; boss gameplay remains available"); return; }
         WorkshopRuntime current = new WorkshopRuntime(() -> WorkshopMigration.settingsFile(config), () -> onlineMode,
                 new WorkshopRuntime.Factory() {
                     private TemplateFiles files;
                     private ItemCatalog catalog;
                     private boolean catalogCaptured;
                     @Override public WorkshopRuntime.Prepared prepare(WorkshopSettings settings) throws IOException {
-                        RelayIdentity identity = RelayIdentity.load(config);
+                        RelayIdentity identity = RelayIdentity.load(config, settings.endpoint());
                         // One writer lock and immutable registry snapshot survive config replacements.
                         // Schema comes from core/addon definitions rather than a second settings catalog.
                         if (files == null) files = new TemplateFiles(config,
@@ -145,8 +148,10 @@ public final class ClockworkBossWorkshop implements DedicatedServerModInitialize
                             try { catalog = WorkshopItemSnapshot.capture(server); }
                             catch (IOException unavailable) { LOG.warn("Workshop item catalog unavailable; manual item IDs remain available"); }
                         }
+                        var compatibility = new WorkshopCompatibility(release, settings.endpoint(), TemplateApi.capabilities(catalog != null));
                         TemplateApi prepared = new TemplateApi(settings.origin().toString(),
-                                new AccessSessions(owner -> ownerAllowed(server, owner)), files, identity.id(), catalog);
+                                new AccessSessions(owner -> ownerAllowed(server, owner)), files, identity.id(), catalog, compatibility,
+                                clockwork.bosses.ClockworkBossTemplateStore::publishedTemplate);
                         return new WorkshopRuntime.Prepared() {
                             private RelayClient relay;
                             @Override public void start(java.util.function.Consumer<TemplateApi> available) {
@@ -159,7 +164,7 @@ public final class ClockworkBossWorkshop implements DedicatedServerModInitialize
                             }
                         };
                     }
-                }, configured -> api = configured);
+                }, configured -> api = configured, release.channel());
         runtime = current;
         try {
             current.reload(true).whenComplete((result, error) -> {

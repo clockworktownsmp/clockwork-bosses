@@ -5,6 +5,108 @@ review. The recorded release has no TPS benchmark, heap profile or long-running
 load test. [Preflight](PREFLIGHT.md) records the checks; [modpack testing](MODPACK_TESTING.md)
 records pack isolation and warnings.
 
+## Publish suggestions — prepared 0.3.0-beta.5, 2026-10-13
+
+After publication, the existing API file worker checks one owned template file
+and adds its name to a sorted immutable autocomplete snapshot. It avoids a full
+directory scan per publish and adds no worker, tick callback, watcher, listener
+or native encounter update. Snapshot reads stay lock-free. Full cache refresh
+and this notification share the existing file-writer monitor to avoid losing
+an update when they overlap. Publication retries add no duplicate suggestions.
+If notification fails, the already committed files remain published and manual
+`/boss reload` is available. Compilation passed; no runtime/performance test was
+run for this change.
+
+Beta.4 explicitly packages the beta channel. This changes resource metadata and
+default host selection, without adding tasks, listeners or network operations.
+Pinned URLs and separate testing identities retain the channel implementation below.
+
+## Workshop release channels — 0.3.0-beta.3, 2026-10-13
+
+Selection is a bounded settings snapshot with explicit packaged channel data.
+It adds no tick listener, game state, fallback routing or new relay protocol.
+Browser/websocket/metadata use one exact origin; origin/identity changes close
+the old connection and revoke sessions through the existing generation guard.
+Existing credentials stay in place. A non-secret origin marker prevents later
+reuse on another host; separate test keys are random, not production derivatives.
+Binding/key file work runs on the existing single configuration worker.
+
+One compatibility object per connection owns a 30-second cache. Credential-free
+GET uses the existing bounded relay network executor, a five-second total wait,
+16 KiB body subscriber and no redirects. Metadata is refreshed on connect and
+relevant status/mutation requests, never from ticks or a periodic poll.
+Requirements are five exact existing logical capability names; unknown names
+and undeclared mod versions deny writes. Permission/CSRF checks precede the
+gate; file commit guards recheck cached, unexpired approval without network I/O
+under the writer lock. Closing invalidates even a late metadata completion.
+API/login/read-only recovery remain usable.
+
+The prepared client validates mutation paths, including separate XHR sound
+uploads. A mismatch pauses existing autosave and sends no new write; no mutation
+is replayed and local recovery is retained. Old servers without metadata keep
+the prior SDK path without new metadata requests. Routing, released API, worker
+and browser regressions pass; no latency/TPS/heap benchmark or new cloud-runtime
+end-to-end test was performed.
+
+## Better Combat and safe potion slots — 0.3.0-beta.2, 2026-10-12
+
+The only new integration reads selected weapon attributes when an owned potion
+is granted/refreshed. No new tick callback, listener, task, queue, damage bridge
+or animation controller is introduced. Better Combat stays compile-only; the
+typed lookup loads only when installed and a linkage failure warns once before
+choosing a free inventory slot. Normal servers without it pass native tests.
+
+The existing bounded inventory scan uses native backing slots. It also recognizes
+an owned cursor bottle on refresh, avoiding another gift while that bottle is
+being moved. Personal offhand equipment stays put. The former displaced-slot
+index, copied item snapshot, content-comparison helper and restoration path are
+removed; there is no retained personal-item copy to reconcile at cleanup. This
+supersedes the historical displacement/restoration descriptions below.
+
+Cleanup still runs on existing encounter/player lifecycle boundaries and sends
+the native inventory state. Hidden offhand slots are scanned directly; there is
+no inventory polling or global container scan. Potion metadata/policy/deadlines
+and existing membership ownership/cleanup remain unchanged. A full inventory
+fails without moving or dropping gear; reentry retries after freeing space.
+
+The native compatibility regression failed before the placement change and
+passes afterward. All 54 tests with Better Combat and 47 without pass, including
+committed damage and existing PvP behavior. This establishes correctness in the
+fixtures, not a measured TPS improvement or a heap/latency benchmark. Real
+multiplayer/animations and the full live modpack remain manual.
+
+The additional Better Combat/Lithium fixture also passes all 54 tests. An
+intermittent existing fixed-box test was isolated by keeping its displaced boss
+in the same loaded chunk and asserting native lookup/alive status; production
+PvP logic was not changed. The catalog fixture's accelerated-loop wait yields
+only in development tests; no park/sleep or manual `doTick()` enters gameplay.
+
+## Encounter PvP protection — 0.3.0-beta.1 source, 2026-10-12
+
+Damage, projectile collision and harmful-effect attempts query loaded encounter
+states and native arena geometry. This is O(loaded encounters) per relevant harm
+attempt, with fast exits for non-player victims and absent player attribution.
+It adds no tick callback, audience scan, queue, scheduled task, scoreboard team
+or separate membership map. The existing 10-tick support watcher is unchanged;
+PvP boundaries do not wait for it. No chunks are loaded to decide protection.
+
+Each projectile/cloud/TNT may own one player UUID, captured on native owner/load
+events and saved alongside its existing owner. A changed native owner clears
+the UUID. There are no strong player references or global projectile indexes.
+Native/addon ownership traversal stops after eight steps to bound cycles.
+Helpful effects and non-player recipients bypass the effect scope allocation.
+Harmful player effects use one temporary thread-local record; nested calls
+restore their outer record and `finally` removes the last record on exceptions.
+
+Fabric's cancellable damage/effect events remain authoritative, including other
+mods' vetoes. Native explosions calculate push independently of accepted damage,
+so one wrapper also returns zero PvP knockback without replacing explosion logic.
+Lightning's native bolt argument supplies Channeling's player cause before
+`thunderHit` ignites or creates unattributed damage; no new owner record is added.
+Isolated native and config tests cover these paths. This is a work/ownership
+review, not a TPS benchmark or long-running heap profile. Real latency and
+third-party combat-mod playtesting remains outstanding.
+
 ## Moving melee wind-up — 0.2.0, 2026-10-12
 
 The existing per-boss AI callback still owns one pending UUID, immutable settings
@@ -838,3 +940,53 @@ Independent face controls add one synchronized integer for brows and reuse the e
 Target holds/counts use one UUID, timestamp and saturating integer per loaded encounter; state disposal releases them. The existing completion/assignment hooks check deadlines with no additional watcher, scheduled task, player registry or tick scan. Automatic arena follow range uses cached dimensions only when attributes are applied. Candidate queries remain native loaded-section queries bounded at 256 blocks; ranged candidates reuse the configured collider raycast only when required. Personal/audience throttle stamps remain one map entry per connected recipient with existing disconnect/server-stop cleanup. No runtime measurements or tests were performed; common/client compilation succeeded.
 
 </details>
+
+## Darkness diagnosis and regression coverage — 2026-10-13
+
+No new production timer, query, cache, listener or retained state was introduced.
+The existing ten-tick aura scan and per-player deadlines remain unchanged. Six
+new native tests and their empty test environments live only in the GameTest
+source set. Embedded players advance native gameplay clocks only inside fixtures;
+those manual calls and test resources are excluded from the distributable jar.
+
+Different native test environments separate long-lived aura timing checks from
+fixtures that clear the shared manager, and separate overlapping large-radius
+auras. Each fixture releases its own boss/player on completion or failure.
+All 53 required native tests and the full offline check passed. This verifies
+application/timing/settings preservation, not renderer behavior, network latency
+or a performance benchmark. Workshop revision protection was retained; it must
+not be bypassed to make a stale browser draft appear to save successfully.
+
+## Eyebrow expression resource ownership — 2026-10-13, development source
+
+Positions, expression and exact one-degree rotations fit in the existing eyebrow
+metadata integer. Its lower 16 position bits retain the legacy layout. The two
+upper rotation codes may make the integer negative; native integer tracking and
+unsigned decoding retain the complete pose without adding an accessor or packet.
+
+The rasterizer computes trigonometry once per brow on face-mask cache misses,
+samples a clipped 6x6 window and returns at most 36 face-local pixel indices.
+Nearest-neighbor inverse sampling preserves sharp pixels and clips before atlas
+writes. Existing 32-entry texture-cache eviction, texture disposal and resource
+reload/disconnect cleanup cover the additional variants. Rasterization is never
+server-tick work, and preview entities remain unregistered and unticked. This is
+code-bound resource reasoning, not a measured performance result or runtime test.
+
+Dynamic expression rules compile once on configuration changes. Each loaded state
+owns a fixed set of primitive poses/deadlines and five immutable rules; it retains
+no entity/player references, growing collection, queue, scheduled task or extra
+spatial query. One Fabric damage observer gates by Warden/player ownership, accepted
+nonfatal damage and enabled encounter settings. Existing native attack/roar/target
+hooks choose poses. The four-shape pool is bounded; disabled rules do not draw randomness.
+Random resting faces draw only on real completed swings/beams.
+
+Expiry shares the existing ten-tick loaded-boss visit. It compares primitives and
+writes existing metadata only when the selected integer differs. Event selection
+does allocate a small immutable pose record, but no allocation is added to expiry.
+Hit/target cooldowns prevent every rapid hit/assignment from rebuilding a face mask.
+The existing 32-texture bound covers variants across all bosses; many differently
+configured bosses can still cause eviction/recreation and need in-world profiling.
+Token checks reject stale finishes/cancellations. Reload, phase changes and encounter
+end clear transient poses; unload/shutdown release the owning state without leaving
+tasks/listeners per boss. Server thread ownership matches native combat hooks.
+No runtime performance benchmark or multiplayer test was performed for this change.

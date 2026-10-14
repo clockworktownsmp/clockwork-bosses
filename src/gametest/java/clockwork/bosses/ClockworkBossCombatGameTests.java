@@ -357,18 +357,18 @@ public class ClockworkBossCombatGameTests {
             player.getInventory().setItem(0, net.minecraft.world.item.ItemStack.EMPTY);
             ClockworkBossFightPotion.leave(boss.getUUID(), player.getUUID());
             ClockworkBossFightPotion.enter(boss.getUUID(), player, policy.potion());
-            helper.assertTrue(sameTransferredContents(player.getInventory().getItem(0), expectedOriginal) && ClockworkBossFightPotion.isPotion(player.getOffhandItem()),
-                    "free slot preserves original contents and offhand receives the potion");
+            helper.assertTrue(sameTransferredContents(player.getOffhandItem(), expectedOriginal) && ClockworkBossFightPotion.isPotion(player.getInventory().getItem(0)),
+                    "original offhand stays in place and free inventory slot receives the potion");
             ClockworkBossPlayerHealth.enter(boss.getUUID(), player, policy.health(), true);
             player.setHealth(40);
-            player.startUsingItem(net.minecraft.world.InteractionHand.OFF_HAND); player.stopUsingItem();
+            player.startUsingItem(net.minecraft.world.InteractionHand.MAIN_HAND); player.stopUsingItem();
             helper.assertTrue(player.getHealth() == 40 && ((ClockworkBossPlayerData) player).clockworkBosses$potionReadyTick() == 0, "interruption grants no dose or cooldown");
-            var duplicate = player.getOffhandItem().copy();
-            player.startUsingItem(net.minecraft.world.InteractionHand.OFF_HAND); ClockworkBossFightPotion.finish(player); player.stopUsingItem();
+            var duplicate = player.getMainHandItem().copy();
+            player.startUsingItem(net.minecraft.world.InteractionHand.MAIN_HAND); ClockworkBossFightPotion.finish(player); player.stopUsingItem();
             long ready = ((ClockworkBossPlayerData) player).clockworkBosses$potionReadyTick();
             helper.assertTrue(player.getHealth() == 60 && ready > player.level().getServer().overworld().getGameTime(), "one validated dose heals and claims a persistent deadline");
-            player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, duplicate);
-            player.startUsingItem(net.minecraft.world.InteractionHand.OFF_HAND); ClockworkBossFightPotion.finish(player); player.stopUsingItem();
+            player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, duplicate);
+            player.startUsingItem(net.minecraft.world.InteractionHand.MAIN_HAND); ClockworkBossFightPotion.finish(player); player.stopUsingItem();
             helper.assertTrue(player.getHealth() == 60 && ((ClockworkBossPlayerData) player).clockworkBosses$potionReadyTick() == ready, "duplicate cannot grant a second dose");
             other.player.setHealth(10); other.player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, duplicate.copy());
             other.player.startUsingItem(net.minecraft.world.InteractionHand.OFF_HAND); ClockworkBossFightPotion.finish(other.player); other.player.stopUsingItem();
@@ -380,7 +380,7 @@ public class ClockworkBossCombatGameTests {
             ClockworkBossPlayerHealth.releaseBoss(boss.getUUID());
             helper.assertTrue(player.getMaxHealth() == 100 && player.getAttribute(Attributes.MAX_HEALTH).hasModifier(external.id()), "arena exit preserves the external modifier");
             ClockworkBossFightPotion.releaseBoss(boss.getUUID());
-            helper.assertTrue(sameTransferredContents(player.getOffhandItem(), expectedOriginal) && player.getInventory().getItem(0).isEmpty(), "cleanup restores original contents once and removes copied bottles");
+            helper.assertTrue(sameTransferredContents(player.getOffhandItem(), expectedOriginal) && player.getInventory().getItem(0).isEmpty(), "cleanup preserves personal offhand and removes copied bottles");
             helper.succeed();
         } finally { ClockworkBossDiagnostics.clear(); boss.discard(); fixture.close(); other.close(); }
     }
@@ -427,7 +427,7 @@ public class ClockworkBossCombatGameTests {
             try {
                 helper.assertTrue(player.getMaxHealth() == 100 && player.getHealth() == 100, "native arena entry grants floor and initial heal");
                 helper.assertTrue(!((ClockworkBossMarker) boss).clockworkBosses$claimInitialHeal(player.getUUID()), "entry recorded the participant in the saved ledger");
-                helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "offhand received the reusable bottle");
+                helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getMainHandItem()) && sameTransferredContents(player.getOffhandItem(), expectedOffhand), "inventory received reusable bottle without moving personal offhand");
                 player.setHealth(50);
                 player.snapTo(boss.position().add(200, 0, 0));
             } catch (Throwable failure) { cleanup.run(); throw failure; }
@@ -436,7 +436,7 @@ public class ClockworkBossCombatGameTests {
             try {
                 helper.assertTrue(player.getMaxHealth() == 20 && Math.abs(player.getHealth() - 10) < .01, "exit preserves half health at native max");
                 helper.assertTrue(sameTransferredContents(player.getOffhandItem(), expectedOffhand) && player.getInventory().getItem(0).isEmpty(),
-                        "untouched offhand contents return once and displaced slot empties");
+                        "personal offhand stays unchanged and temporary inventory bottle is cleared");
                 player.snapTo(boss.position().add(2, 0, 0));
             } catch (Throwable failure) { cleanup.run(); throw failure; }
         });
@@ -444,7 +444,7 @@ public class ClockworkBossCombatGameTests {
             try {
                 helper.assertTrue(player.getMaxHealth() == 100 && Math.abs(player.getHealth() - 50) < .01, "reentry preserves health and cannot repeat the free heal");
                 player.getFoodData().setFoodLevel(0); player.getFoodData().setSaturation(0);
-                player.startUsingItem(net.minecraft.world.InteractionHand.OFF_HAND);
+                player.startUsingItem(net.minecraft.world.InteractionHand.MAIN_HAND);
                 ClockworkBossFightPotion.finish(player);
                 helper.assertTrue(Math.abs(player.getHealth() - 70) < .01, "one dose adds 20 HP");
                 helper.assertTrue(player.getFoodData().getFoodLevel() == 20 && player.getFoodData().getSaturationLevel() == 20, "one dose fills hunger and saturation");
@@ -461,7 +461,7 @@ public class ClockworkBossCombatGameTests {
                 ClockworkBossPlayerHealth.releaseBoss(boss.getUUID());
                 ClockworkBossFightPotion.releaseBoss(boss.getUUID());
                 helper.assertTrue(player.getMaxHealth() == 20 && Math.abs(player.getHealth() - 14) < .01, "cleanup removes only the owned floor proportionally");
-                helper.assertTrue(sameTransferredContents(player.getOffhandItem(), expectedOffhand) && player.getInventory().getItem(0).isEmpty(), "cleanup restores the original offhand contents once");
+                helper.assertTrue(sameTransferredContents(player.getOffhandItem(), expectedOffhand) && player.getInventory().getItem(0).isEmpty(), "cleanup preserves personal offhand and clears inventory bottle");
                 helper.succeed();
             } finally { cleanup.run(); }
         });
@@ -664,7 +664,7 @@ public class ClockworkBossCombatGameTests {
 
     /** Exercise the real remove command, including bottles moved out of the
      * offhand and overlapping grants. Removal must release only its encounter;
-     * the final encounter restores the personal offhand and removes all copies. */
+     * the final encounter preserves the personal offhand and removes all copies. */
     @GameTest(maxTicks = 20, setupTicks = 60)
     public void remove_command_cleans_fight_potion(GameTestHelper helper) throws Exception {
         var fixture = new PlayerFixture(helper, helper.absoluteVec(new Vec3(1, 2, 1)));
@@ -677,17 +677,17 @@ public class ClockworkBossCombatGameTests {
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
             ClockworkBossFightPotion.enter(first.getUUID(), player, policy);
             ClockworkBossFightPotion.enter(second.getUUID(), player, policy);
-            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "grant placed a fight potion in offhand");
+            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getMainHandItem()), "grant placed a fight potion in an empty inventory slot");
             helper.assertTrue(ClockworkBossManager.remove(source(helper), ((ClockworkBossMarker) first).clockworkBosses$getName()) == 1,
                     "first remove command succeeds");
-            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "another encounter retains its potion grant");
-            var orphan = player.getOffhandItem().copy();
-            player.getInventory().setItem(1, player.getOffhandItem().copy());
-            player.containerMenu.setCarried(player.getOffhandItem().copy());
+            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getMainHandItem()), "another encounter retains its potion grant");
+            var orphan = player.getMainHandItem().copy();
+            player.getInventory().setItem(1, player.getMainHandItem().copy());
+            player.containerMenu.setCarried(player.getMainHandItem().copy());
             int updatesBefore = fixture.listener.fullInventoryUpdates;
             helper.assertTrue(ClockworkBossManager.remove(source(helper), ((ClockworkBossMarker) second).clockworkBosses$getName()) == 1,
                     "final remove command succeeds");
-            helper.assertTrue(sameTransferredContents(player.getOffhandItem(), original), "final removal restores personal offhand contents");
+            helper.assertTrue(sameTransferredContents(player.getOffhandItem(), original), "final removal leaves personal offhand contents unchanged");
             helper.assertTrue(player.containerMenu.getCarried().isEmpty(), "final removal clears cursor bottle");
             helper.assertTrue(fixture.listener.fullInventoryUpdates > updatesBefore, "removal sends authoritative full inventory for stale client caches");
             for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++)
@@ -695,7 +695,7 @@ public class ClockworkBossCombatGameTests {
             // A creative copy or restored inventory can reintroduce a bottle
             // after its membership ends. A later explicit removal must clear it
             // without altering the player's unrelated personal items.
-            player.getInventory().setItem(2, player.getOffhandItem());
+            player.getInventory().setItem(2, player.getInventory().removeItemNoUpdate(net.minecraft.world.entity.player.Inventory.SLOT_OFFHAND));
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, orphan);
             Warden third = boss(helper, ClockworkBossTemplateDocument.defaults(), "potion_remove_orphan");
             try {
@@ -733,9 +733,9 @@ public class ClockworkBossCombatGameTests {
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
             player.getInventory().setItem(9, ordinary.copy());
             ClockworkBossFightPotion.enter(boss.getUUID(), player, new ClockworkBossPlayerSupport.Potion(true, 20, 300, 20, 20));
-            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getOffhandItem()), "death fixture starts with fight bottle");
-            player.getInventory().setItem(1, player.getOffhandItem().copy());
-            player.containerMenu.setCarried(player.getOffhandItem().copy());
+            helper.assertTrue(ClockworkBossFightPotion.isPotion(player.getMainHandItem()), "death fixture starts with inventory fight bottle");
+            player.getInventory().setItem(1, player.getMainHandItem().copy());
+            player.containerMenu.setCarried(player.getMainHandItem().copy());
             // Native respawn must stay in the loaded fixture chunk. A remote
             // world spawn starts unrelated chunk generation just before this
             // short-lived GameTest server shuts down; it is not needed to test
@@ -824,9 +824,9 @@ public class ClockworkBossCombatGameTests {
         try {
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
             ClockworkBossFightPotion.enter(grant, player, new ClockworkBossPlayerSupport.Potion(true, 20, 300, 20, 20));
-            var saved = player.getOffhandItem().copy();
+            var saved = player.getMainHandItem().copy();
             ClockworkBossFightPotion.releaseBoss(grant);
-            player.getInventory().setItem(2, player.getOffhandItem());
+            player.getInventory().setItem(2, player.getInventory().removeItemNoUpdate(net.minecraft.world.entity.player.Inventory.SLOT_OFFHAND));
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, saved.copy());
             player.getInventory().setItem(1, saved.copy());
             player.containerMenu.setCarried(saved.copy());
@@ -893,7 +893,7 @@ public class ClockworkBossCombatGameTests {
             player.setInvulnerableTime(0); player.damageCooldownTime = 0;
             rules.set(net.minecraft.world.level.gamerules.GameRules.KEEP_INVENTORY, true, helper.getLevel().getServer());
             player.hurtServer(helper.getLevel(), player.damageSources().generic(), 1000);
-            helper.assertTrue(!player.isAlive() && sameTransferredContents(player.getOffhandItem(), original), "committed death restores personal offhand with keepInventory");
+            helper.assertTrue(!player.isAlive() && sameTransferredContents(player.getOffhandItem(), original), "committed death preserves personal offhand with keepInventory");
             helper.assertTrue(player.getInventory().getItem(9).is(net.minecraft.world.item.Items.POTION)
                     && !ClockworkBossFightPotion.isPotion(player.getInventory().getItem(9)), "ordinary potion is retained");
             for (int slot = 0; slot < player.getInventory().getContainerSize(); slot++)
@@ -916,33 +916,33 @@ public class ClockworkBossCombatGameTests {
         try {
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
             ClockworkBossFightPotion.enter(owner, player, policy);
-            var copied = player.getInventory().getItem(0).copy();
+            var copied = player.getOffhandItem().copy();
             copied.set(net.minecraft.core.component.DataComponents.MAX_STACK_SIZE, 32);
-            player.getInventory().setItem(0, copied);
+            player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, copied);
             ClockworkBossFightPotion.releaseBoss(owner);
             helper.assertTrue(sameTransferredContents(player.getOffhandItem(), original)
                             && player.getOffhandItem().getMaxStackSize() == 32 && player.getInventory().getItem(0).isEmpty(),
-                    "copied stack transfers back once with its live capacity, leaving source empty");
+                    "copied personal equipment stays in place with its live capacity; bottle is cleared");
 
             ClockworkBossFightPotion.enter(owner, player, policy);
-            player.getInventory().getItem(0).set(net.minecraft.core.component.DataComponents.CUSTOM_NAME,
+            player.getOffhandItem().set(net.minecraft.core.component.DataComponents.CUSTOM_NAME,
                     net.minecraft.network.chat.Component.literal("changed by another mod"));
             ClockworkBossFightPotion.releaseBoss(owner);
-            helper.assertTrue(player.getOffhandItem().isEmpty() && player.getInventory().getItem(0).getCount() == 7,
-                    "changed components stay in inventory and are not replaced by a snapshot");
+            helper.assertTrue(player.getOffhandItem().getCount() == 7 && player.getInventory().getItem(0).isEmpty(),
+                    "changed personal components stay in the offhand; no snapshot replaces them");
 
             player.getInventory().setItem(0, net.minecraft.world.item.ItemStack.EMPTY);
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
             ClockworkBossFightPotion.enter(owner, player, policy);
-            player.getInventory().getItem(0).setCount(6);
+            player.getOffhandItem().setCount(6);
             ClockworkBossFightPotion.releaseBoss(owner);
-            helper.assertTrue(player.getOffhandItem().isEmpty() && player.getInventory().getItem(0).getCount() == 6,
-                    "changed count stays untouched and is never restored from the seven-item snapshot");
+            helper.assertTrue(player.getOffhandItem().getCount() == 6 && player.getInventory().getItem(0).isEmpty(),
+                    "changed personal count stays untouched; no stored snapshot exists");
 
             player.getInventory().setItem(0, net.minecraft.world.item.ItemStack.EMPTY);
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
             ClockworkBossFightPotion.enter(owner, player, policy);
-            player.getInventory().setItem(1, player.getInventory().removeItemNoUpdate(0));
+            player.getInventory().setItem(1, player.getInventory().removeItemNoUpdate(net.minecraft.world.entity.player.Inventory.SLOT_OFFHAND));
             ClockworkBossFightPotion.releaseBoss(owner);
             helper.assertTrue(player.getOffhandItem().isEmpty() && sameContents(player.getInventory().getItem(1), original),
                     "moved original remains in its new slot without being duplicated");
@@ -950,12 +950,13 @@ public class ClockworkBossCombatGameTests {
             player.getInventory().setItem(1, net.minecraft.world.item.ItemStack.EMPTY);
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND, original.copy());
             ClockworkBossFightPotion.enter(owner, player, policy);
+            player.getInventory().setItem(2, player.getInventory().removeItemNoUpdate(net.minecraft.world.entity.player.Inventory.SLOT_OFFHAND));
             player.setItemInHand(net.minecraft.world.InteractionHand.OFF_HAND,
                     new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND));
             ClockworkBossFightPotion.releaseBoss(owner);
             helper.assertTrue(player.getOffhandItem().is(net.minecraft.world.item.Items.DIAMOND)
-                            && sameContents(player.getInventory().getItem(0), original),
-                    "new personal offhand is preserved and the displaced original stays in inventory");
+                            && sameContents(player.getInventory().getItem(2), original),
+                    "player-moved original and new personal offhand are both preserved");
 
             // An incoming ordinary totem may be rewritten by the pack's
             // clear/give rule. Its eventual slot is controlled by that rule,
@@ -1390,6 +1391,12 @@ public class ClockworkBossCombatGameTests {
         return boss(helper, config, suffix, false);
     }
     static Warden boss(GameTestHelper helper, JsonObject config, String suffix, boolean playerSupport) throws Exception {
+        return boss(helper, config, suffix, playerSupport, false);
+    }
+    /** PvP fixtures explicitly opt in; unrelated combat/support tests retain
+     * their prior rules even if another fixture has a nearby active arena. */
+    static Warden boss(GameTestHelper helper, JsonObject config, String suffix, boolean playerSupport, boolean pvp) throws Exception {
+        config.getAsJsonObject("boss_bar").getAsJsonObject("pvp_protection").addProperty("enabled", pvp);
         // Existing combat fixtures opt out so arena overlap cannot grant their
         // mock players health/healing intended only for the support fixture.
         config.getAsJsonObject("boss_bar").getAsJsonObject("player_health").addProperty("enabled", playerSupport);

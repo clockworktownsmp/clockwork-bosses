@@ -17,13 +17,13 @@ From the core project, using Java 25:
 These commands compile/package without running tests. The example reads
 `mod_version` and `archives_base_name` from the core's `gradle.properties` and
 uses that exact jar in `../../build/libs/`. For the current core this is
-`clockwork_bosses-0.2.0.jar`; a missing matching jar stops the build rather
+`clockwork_bosses-0.3.0-beta.5.jar`; a missing matching jar stops the build rather
 than falling back to an older file.
 
-Addon `0.1.3` also writes that exact core version into its runtime dependency.
+Addon `0.1.8` also writes that exact core version into its runtime dependency.
 The API is experimental, so the example does not claim that a different core
 version is compatible. After changing the core version, build the core and then
-rebuild the addon. It creates `clockwork_lightning_example-0.1.3.jar` in
+rebuild the addon. It creates `clockwork_lightning_example-0.1.8.jar` in
 `examples/lightning-addon/build/libs/`. The addon and its source are not bundled
 into the core jar.
 

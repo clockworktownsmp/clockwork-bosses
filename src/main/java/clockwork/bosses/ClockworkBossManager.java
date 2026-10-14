@@ -98,6 +98,19 @@ public final class ClockworkBossManager {
         ServerEntityEvents.ENTITY_UNLOAD.register(ClockworkBossManager::onEntityUnload);
 
         ServerTickEvents.END_SERVER_TICK.register(ClockworkBossManager::tickServer);
+        // Fabric reports accepted, nonfatal server damage. Player ownership also
+        // covers projectiles; vetoed attempts, environmental damage and death do
+        // not create a reaction. This observer never changes damage or AI.
+        ServerLivingEntityEvents.AFTER_DAMAGE.register((victim, source, base, taken, blocked) -> {
+            if (taken > 0 && !blocked && victim instanceof Warden boss && boss.isAlive()
+                    && source.getEntity() instanceof ServerPlayer) {
+                var state = activeFaceState(boss);
+                if (state != null) {
+                    state.face().hit(boss.level().getGameTime(), boss.getRandom());
+                    syncFace(boss, state);
+                }
+            }
+        });
         // Fabric fires this after death is committed; sound and support cleanup
         // remain separate from the reward service and its exactly-once claim.
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
@@ -234,6 +247,11 @@ public final class ClockworkBossManager {
                 if (!state.dimension().equals(level.dimension())) {
                     state.setDimension(level.dimension());
                 }
+
+                // Reuse this loaded-entity visit for short reaction/recovery
+                // expiry. No added listener, scan, JSON parsing or new packet
+                // when the selected pose has not actually changed.
+                if (state.face().enabled()) syncFace(warden, state);
 
                 // Dormant Wardens are managed here because no-AI Wardens do not run their
                 // normal customServerAiStep hook. Activation therefore stays independent
@@ -856,6 +874,8 @@ public final class ClockworkBossManager {
     }
     private static void endEncounter(Warden boss, ClockworkBossState state, clockwork.bosses.api.BossAction.StopReason reason) {
         if (!state.claimEncounterEnd()) return;
+        state.face().clear();
+        syncFace(boss, state);
         var snapshot = encounterSnapshot(boss, state);
         if (state.actionRuntime() != null) state.actionRuntime().stop(reason);
         var departing = state.bossBarPlayerIds();
@@ -877,6 +897,10 @@ public final class ClockworkBossManager {
         ClockworkBossState state = stateFor(warden);
         if (state == null || generation != state.subphaseGeneration() || !warden.isAlive() || warden.isRemoved()) return;
         if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, attacked, "melee_completed", "captured_generation", generation);
+        if (!state.encounterEnded() && !state.dormant() && !state.emerging()) {
+            state.face().afterAttack(warden.getRandom());
+            syncFace(warden, state);
+        }
         ClockworkBossTargets.afterAttack(warden, state, attacked);
         completeSubphaseAttack(warden, state, generation);
         ClockworkBossDiagnostics.end(warden);
@@ -892,6 +916,10 @@ public final class ClockworkBossManager {
         ClockworkBossState state = stateFor(warden);
         if (state == null || generation != state.subphaseGeneration() || !warden.isAlive() || warden.isRemoved()) return;
         if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, attacked, "sonic_completed", "captured_generation", generation);
+        if (!state.encounterEnded() && !state.dormant() && !state.emerging()) {
+            state.face().afterAttack(warden.getRandom());
+            syncFace(warden, state);
+        }
         ClockworkBossTargets.afterAttack(warden, state, attacked, shot);
         completeSubphaseAttack(warden, state, generation);
         ClockworkBossDiagnostics.end(warden);
@@ -974,6 +1002,10 @@ public final class ClockworkBossManager {
             ClockworkBossSonicBoom.cancelCharge(boss, state);
         if (state.pendingMelee() != null && (actual == null || !state.pendingMelee().target().equals(actual.getUUID())))
             ClockworkBossMelee.cancel(boss, state);
+        if (!state.encounterEnded() && !state.dormant() && !state.emerging()) {
+            state.face().targetChanged(actual != null, boss.level().getGameTime(), boss.getRandom());
+            syncFace(boss, state);
+        }
         if (actual instanceof ServerPlayer player) ClockworkBossAnnouncements.changed(boss, state, player);
     }
 
@@ -1012,6 +1044,38 @@ public final class ClockworkBossManager {
      */
     public static ClockworkBossState stateFor(Warden warden) {
         return ACTIVE.get(warden.getUUID());
+    }
+
+    /** Server visual lifecycle hooks do a loaded-state lookup only. Client
+     * previews, ordinary Wardens and disabled rules cannot start an expression. */
+    private static ClockworkBossState activeFaceState(Warden boss) {
+        if (!(boss.level() instanceof ServerLevel) || !boss.isAlive() || boss.isRemoved()) return null;
+        var state = stateFor(boss);
+        return state != null && !state.encounterEnded() && !state.dormant() && !state.emerging() && state.face().enabled() ? state : null;
+    }
+    public static long beginFaceAttack(Warden boss, ClockworkBossFaceEvents.Attack type, long now, int duration) {
+        var state = activeFaceState(boss);
+        if (state == null) return 0;
+        long token = state.face().begin(type, now, duration, boss.getRandom());
+        syncFace(boss, state);
+        return token;
+    }
+    public static void finishFaceAttack(Warden boss, long token, long now, int recovery) {
+        var state = activeFaceState(boss);
+        if (state == null || token == 0) return;
+        state.face().finish(token, now, recovery);
+        syncFace(boss, state);
+    }
+    public static void cancelFaceAttack(Warden boss, long token) {
+        if (!(boss.level() instanceof ServerLevel) || token == 0) return;
+        var state = stateFor(boss);
+        if (state != null) { state.face().cancel(token); syncFace(boss, state); }
+    }
+    private static void syncFace(Warden boss, ClockworkBossState state) {
+        if (boss == null) return; // Shutdown/missing-entity cleanup can release state without a loaded mob.
+        var marker = (ClockworkBossMarker) boss;
+        int pose = state.face().packed(boss.level().getGameTime());
+        if (marker.clockworkBosses$getBrows() != pose) marker.clockworkBosses$setBrows(pose);
     }
 
     /**
@@ -1410,6 +1474,17 @@ public final class ClockworkBossManager {
         AABB area = visibilityQuery(state, boss);
         return area != null && area.intersects(player.getBoundingBox()) && insideVisibilityRadius(state, boss, player);
     }
+
+    /** Fresh event-time geometry makes PvP entry/exit immediate; the ten-tick
+     * viewer snapshot is deliberately not an authority for damage. Read only
+     * enabled, live encounters; no team mutation, player scan or new watcher. */
+    static boolean hasPvpProtection(ServerPlayer player) {
+        for (var state : ACTIVE.values()) {
+            if (!state.encounterEnded() && state.pvpProtection().enabled()
+                    && state.dimension().equals(player.level().dimension()) && isPlayerInArena(state.uuid(), player)) return true;
+        }
+        return false;
+    }
     /** All support uses the same arena diff. Recheck after native buff/health
      * callbacks, because another mod can synchronously delete the encounter. */
     private static void enterPlayerSupport(ClockworkBossState state, Warden boss, ServerPlayer player) {
@@ -1612,6 +1687,7 @@ public final class ClockworkBossManager {
         // keeps cancellation observable and clears its visual at the same event.
         ClockworkBossMelee.cancel(warden, state);
         if (!state.setCurrentPhase(phase) || ACTIVE.get(state.uuid()) != state || !warden.isAlive() || warden.isRemoved()) return;
+        syncFace(warden, state); // The new phase has discarded old expression overlays.
         applyPhaseAttributes(warden, state, phase);
         state.clearDarknessSchedule();
         if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.event(warden, warden.getTarget(), "health_phase_changed", "boss_hp", warden.getHealth(), "boss_max_hp", warden.getMaxHealth());

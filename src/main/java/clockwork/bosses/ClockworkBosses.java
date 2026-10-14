@@ -77,6 +77,7 @@ public class ClockworkBosses implements ModInitializer {
         ClockworkBossSoundNetwork.register();
         ClockworkBossRewards.register();
         ClockworkBossManager.registerLifecycle();
+        ClockworkBossPvp.register();
         ClockworkBossSelector.register();
         ClockworkBossTemplateEditor.register();
         ClockworkBossDiagnostics.register();

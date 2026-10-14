@@ -12,6 +12,9 @@ import java.util.Base64;
 
 /** Local server credential, unrelated to players. Never sent to a browser or log. */
 final class RelayIdentity {
+    static final class OriginConflict extends IOException {
+        OriginConflict() { super("Relay identity is bound to another origin. Use an isolated test configuration/testing_channel; existing credentials were left in place"); }
+    }
     private final String secret, id;
     RelayIdentity(String secret) throws IOException {
         if (!secret.matches("[A-Za-z0-9_-]{43}")) throw new IOException("Invalid relay-server.key; restore its backup or remove it while the server is stopped");
@@ -21,6 +24,34 @@ final class RelayIdentity {
     String id() { return id; }
     static RelayIdentity load(Path config) throws IOException {
         Path directory = config.toAbsolutePath().normalize().resolve("clockwork-bosses-web");
+        return loadDirectory(directory);
+    }
+    /** Upgrade preserves the legacy key at its explicitly configured origin.
+     * A public, non-secret origin marker prevents later cross-host reuse.
+     * Build-selected non-stable hosts/test overrides get independently generated
+     * identities, never copied/derived from the production secret. */
+    static synchronized RelayIdentity load(Path config, WorkshopRelease.Endpoint endpoint) throws IOException {
+        Path root = config.toAbsolutePath().normalize().resolve("clockwork-bosses-web");
+        Path directory = endpoint.legacyIdentity() ? root
+                : root.resolve("relay-identities").resolve(AccessSessions.hash(endpoint.origin().toString()));
+        ClockworkBossPaths.checkAncestors(directory); Files.createDirectories(directory); ClockworkBossPaths.checkAncestors(directory);
+        Path binding = directory.resolve("relay-server.origin");
+        ClockworkBossPaths.checkAncestors(binding);
+        String origin = endpoint.origin().toString();
+        if (Files.exists(binding, LinkOption.NOFOLLOW_LINKS)) {
+            byte[] bytes = TemplateFiles.read(binding, 2048);
+            if (!new String(bytes, StandardCharsets.UTF_8).equals(origin + "\n"))
+                throw new OriginConflict();
+        } else {
+            // No secret is written here. Existing explicit relay_url is the
+            // owner's legacy trust declaration, not an inferred prior host.
+            TemplateFiles.atomic(binding, (origin + "\n").getBytes(StandardCharsets.UTF_8), false, () -> {
+                ClockworkBossPaths.checkAncestors(directory);
+            });
+        }
+        return loadDirectory(directory);
+    }
+    private static RelayIdentity loadDirectory(Path directory) throws IOException {
         ClockworkBossPaths.checkAncestors(directory);
         Files.createDirectories(directory);
         ClockworkBossPaths.checkAncestors(directory);

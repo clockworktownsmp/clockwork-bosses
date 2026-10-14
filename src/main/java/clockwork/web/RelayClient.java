@@ -50,7 +50,12 @@ final class RelayClient implements AutoCloseable {
         boolean local = loopbackTest && "http".equals(uri.getScheme()) && ("127.0.0.1".equals(uri.getHost()) || "[::1]".equals(uri.getHost()));
         if ((!"https".equals(uri.getScheme()) && !local) || uri.getHost() == null || uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null || !uri.getRawPath().isEmpty() || uri.getPort() == 0 || uri.getPort() > 65535)
             throw new IOException("relay_url must be an HTTPS origin without a path, trailing slash, or credentials");
-        return uri;
+        // Browser Origin serializes host case/default ports canonically. Use
+        // that same exact origin for websocket, links, metadata and key binding;
+        // this never changes a configured host or broadens origin checks.
+        try { return new URI(uri.getScheme(), null, uri.getHost().toLowerCase(Locale.ROOT),
+                uri.getPort() == (local ? 80 : 443) ? -1 : uri.getPort(), "", null, null); }
+        catch (URISyntaxException invalid) { throw new IOException("Invalid relay_url origin"); }
     }
     RelayClient(URI origin, RelayIdentity identity, ApiFactory factory, Consumer<TemplateApi> available) {
         this.identity = identity; this.factory = factory; this.available = available;
@@ -67,6 +72,12 @@ final class RelayClient implements AutoCloseable {
         synchronized (this) { api = lifetimeApi; }
         try { if (api == null) api = factory.create(); }
         catch (IOException failure) { LOG.warn("Workshop relay could not open local template storage; retrying. Check its paths and permissions."); retry(); return; }
+        synchronized (this) {
+            if (closed) { api.close(); return; }
+        }
+        // Read-only website metadata uses this same origin/client. No new
+        // websocket protocol or automatic routing negotiation is introduced.
+        api.connectCompatibility(http);
         synchronized (this) {
             if (closed) { api.close(); return; }
             lifetimeApi = api;

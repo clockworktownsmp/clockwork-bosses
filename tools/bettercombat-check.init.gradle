@@ -1,0 +1,19 @@
+// Optional test launcher: supply a local directory containing the exact public
+// mod versions below. Only a disposable build folder is modified. These jars
+// are neither bundled nor redistributed by Clockwork Bosses.
+gradle.projectsEvaluated {
+    def project = rootProject
+    project.tasks.named('runBettercombatcheck') {
+        dependsOn project.tasks.named('gametestClasses')
+        doFirst {
+            def location = project.findProperty('betterCombatTestMods')
+            if (location == null) throw new GradleException('Supply -PbetterCombatTestMods=<mod fixture directory>')
+            def supplied = project.file(location)
+            for (name in ['bettercombat-fabric-3.2.2+26.3.jar', 'cloth-config-26.3.158.jar', 'PlayerAnimationLibMerged-1.2.8+mc.26.3.jar']) {
+                def source = new File(supplied, name)
+                if (!source.isFile()) throw new GradleException('Missing compatibility fixture: ' + name)
+                project.copy { from source; into new File(project.projectDir, 'build/compat-bettercombat/mods') }
+            }
+        }
+    }
+}

@@ -21,7 +21,9 @@ final class WorkshopRuntime implements AutoCloseable {
     record Result(WorkshopSettings settings, boolean changed) {
         String message() {
             if (!changed && settings.active()) return "Workshop config reloaded; settings are unchanged. Existing links and browser sessions remain valid.";
-            if (settings.active()) return "Workshop config reloaded; connecting to the HTTPS relay. Old links and sessions were revoked; use /boss workshop open when connected.";
+            if (settings.active()) return "Workshop config reloaded; selected " + settings.endpoint().channelName() + " at " + settings.origin()
+                    + (settings.endpoint().testing() ? " (isolated testing override)" : "")
+                    + ". Connecting to this HTTPS relay only. Old links and sessions were revoked; use /boss workshop open when connected.";
             String state = settings.enabled() ? "template access is disabled" : "the relay is disabled";
             return "Workshop config reloaded; " + state + (changed ? ". Old links and sessions were revoked." : ".");
         }
@@ -31,6 +33,7 @@ final class WorkshopRuntime implements AutoCloseable {
     private final BooleanSupplier onlineMode;
     private final Factory factory;
     private final Consumer<TemplateApi> available;
+    private final WorkshopRelease.Channel buildChannel;
     private final ThreadPoolExecutor worker;
     private volatile Thread configThread;
     private WorkshopSettings settings;
@@ -43,7 +46,11 @@ final class WorkshopRuntime implements AutoCloseable {
         this(() -> file, onlineMode, factory, available);
     }
     WorkshopRuntime(SettingsPath path, BooleanSupplier onlineMode, Factory factory, Consumer<TemplateApi> available) {
+        this(path, onlineMode, factory, available, WorkshopRelease.Channel.STABLE);
+    }
+    WorkshopRuntime(SettingsPath path, BooleanSupplier onlineMode, Factory factory, Consumer<TemplateApi> available, WorkshopRelease.Channel buildChannel) {
         this.path = path; this.onlineMode = onlineMode; this.factory = factory; this.available = available;
+        this.buildChannel = buildChannel;
         worker = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1), task -> {
             Thread thread = new Thread(task, "clockwork-workshop-config"); thread.setDaemon(true); configThread = thread; return thread;
         }, new ThreadPoolExecutor.AbortPolicy());
@@ -55,7 +62,7 @@ final class WorkshopRuntime implements AutoCloseable {
         var result = new CompletableFuture<Result>(); pending = result;
         try { worker.execute(() -> {
             Result loaded = null; IOException failure = null;
-            try { loaded = apply(WorkshopSettings.load(settingsFile(), createDefaults)); }
+            try { loaded = apply(WorkshopSettings.load(settingsFile(), createDefaults, buildChannel)); }
             catch (IOException error) { failure = error; }
             catch (RuntimeException error) { failure = new IOException("Could not prepare workshop settings; check config and storage permissions"); }
             finally { synchronized (WorkshopRuntime.this) { if (pending == result) pending = null; } }
@@ -81,6 +88,7 @@ final class WorkshopRuntime implements AutoCloseable {
         }
         Prepared prepared;
         try { prepared = next.active() ? factory.prepare(next) : null; }
+        catch (RelayIdentity.OriginConflict mismatch) { throw mismatch; }
         catch (IOException | RuntimeException invalidStorage) { throw new IOException("Could not prepare relay key or template storage; check their paths and permissions"); }
         boolean adopted = false;
         try {

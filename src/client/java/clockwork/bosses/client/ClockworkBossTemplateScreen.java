@@ -76,6 +76,8 @@ public final class ClockworkBossTemplateScreen extends Screen {
     private JsonObject previewConfig;
     private boolean previewFailed, headPreview = false, rotating;
     private String previewPhase = "", previewEye = "Both", previewBrow = "Both", previewPupil = "Both";
+    // Local preview selectors never become template fields or start an encounter.
+    private String previewFaceEvent = "base", previewFaceSample = "angry";
     private float previewYaw, previewPitch;
     private int previewX, previewY, previewWidth, previewHeight;
     // Template fields change on input/response, not every frame. Cache metadata
@@ -194,6 +196,7 @@ public final class ClockworkBossTemplateScreen extends Screen {
                 addGroup("boss_bar.area_effects", "Beacon effects", 0);
                 addGroup("boss_bar.player_health", "Fight health", 0);
                 addGroup("boss_bar.reusable_potion", "Reusable potion", 0);
+                addGroup("boss_bar.pvp_protection", "PvP protection", 0);
             } else addRows(currentObject(), selected, 0);
             formWidgets(0, contentWidth, false);
         }
@@ -314,7 +317,7 @@ public final class ClockworkBossTemplateScreen extends Screen {
         for (var entry : object.entrySet()) {
             String child = path.isEmpty() ? entry.getKey() : path + "." + entry.getKey();
             if (!visibleField(child)) continue;
-            if (selected.equals("boss_bar") && List.of("boss_bar.area_effects", "boss_bar.player_health", "boss_bar.reusable_potion").contains(child)) continue;
+            if (selected.equals("boss_bar") && List.of("boss_bar.area_effects", "boss_bar.player_health", "boss_bar.reusable_potion", "boss_bar.pvp_protection").contains(child)) continue;
             if (selected.startsWith("phases.") && child.endsWith(".sounds")) continue; // All audio is on Sounds.
             if (entry.getValue().isJsonObject()) {
                 rows.add(new Row(child, label(entry.getKey()), depth, true));
@@ -362,6 +365,7 @@ public final class ClockworkBossTemplateScreen extends Screen {
 
     private boolean pairable(Row row, boolean previewCoordinates) {
         if (row.heading || row.path.startsWith("__")) return false;
+        if (row.path.startsWith("skin.glowing_eyebrows.") && row.path.endsWith(".expression")) return false;
         if (previewCoordinates) return row.path.startsWith("skin.glowing_eyes.") || row.path.startsWith("skin.glowing_eyebrows.")
                 || row.path.startsWith("skin.glowing_pupils.");
         var field = ClockworkBossEditorSchema.field(row.path, ClockworkBossEditorSchema.get(draft, row.path), draft);
@@ -371,8 +375,10 @@ public final class ClockworkBossTemplateScreen extends Screen {
 
     private int fieldHeight(Row row, int availableWidth) {
         if (row.heading || row.path.equals("__skin_load")) return GROUP_HEIGHT;
+        if (row.path.equals("__face_event") || row.path.equals("__face_sample")) return GROUP_HEIGHT;
         if (row.path.equals("__eye_controls")) return 114;
-        if (row.path.equals("__brow_controls") || row.path.equals("__pupil_controls")) return 90;
+        if (row.path.equals("__brow_controls")) return 114;
+        if (row.path.equals("__pupil_controls")) return 90;
         int usableWidth = availableWidth - Math.min(row.depth, 6) * 10;
         return (usableWidth < 300 ? 44 : 32) + (darknessNote(row.path).isEmpty() ? 0 : 10);
     }
@@ -406,6 +412,14 @@ public final class ClockworkBossTemplateScreen extends Screen {
                     button.setTooltip(Tooltip.create(Component.literal(sectionHelp(row.path))));
                 } else if (row.path.equals("__skin_load")) {
                     addButton(contentX + 10, y + 2, contentWidth - 10, CONTROL_HEIGHT, row.label, this::refreshPreview);
+                } else if (row.path.equals("__face_event") || row.path.equals("__face_sample")) {
+                    boolean event = row.path.equals("__face_event");
+                    List<String> choices = event ? List.of("base", "melee", "sonic_boom", "roar", "hurt", "target_change", "rest") : previewFacePool();
+                    String current = event ? previewFaceEvent : choices.contains(previewFaceSample) ? previewFaceSample : choices.getFirst();
+                    int selectorX = contentX + 10, selectorWidth = contentWidth - 10;
+                    addButton(selectorX, y + 2, selectorWidth, CONTROL_HEIGHT,
+                            row.label + ": " + label(current) + " ▾", () -> dropdown = new Dropdown(row.path, choices,
+                                    selectorX, y + CONTROL_HEIGHT + 2, selectorWidth, 0));
                 } else fieldWidgets(row, y);
             }
         } finally { contentX = savedX; contentWidth = savedWidth; }
@@ -655,9 +669,14 @@ public final class ClockworkBossTemplateScreen extends Screen {
         }
         rows.add(new Row("skin.glowing_eyebrows", "Glowing eyebrows", 0, true));
         if (!collapsed.contains("skin.glowing_eyebrows")) {
-            for (String key : List.of("left_x", "left_y", "right_x", "right_y"))
+            for (String key : List.of("expression", "left_rotation", "right_rotation", "left_x", "left_y", "right_x", "right_y"))
                 rows.add(new Row("skin.glowing_eyebrows." + key, label(key), 1, false));
             rows.add(new Row("__brow_controls", "Position eyebrows", 1, false));
+            rows.add(new Row("__face_event", "Preview expression", 1, false));
+            String previewRule = effectiveText("skin.glowing_eyebrows.events." + previewFaceEvent + ".expression", "inherit");
+            if (previewFaceEvent.equals("rest") || previewRule.equals("random"))
+                rows.add(new Row("__face_sample", "Random sample", 1, false));
+            addGroup("skin.glowing_eyebrows.events", "Encounter expressions", 1);
         }
         rows.add(new Row("skin.glowing_pupils", "Pupils", 0, true));
         if (!collapsed.contains("skin.glowing_pupils")) {
@@ -678,7 +697,7 @@ public final class ClockworkBossTemplateScreen extends Screen {
             addButton(previewX, buttonY + 22, panelWidth, CONTROL_HEIGHT, "Glow: " + label(previewPhase) + " ▾",
                     () -> dropdown = new Dropdown("__phase", phaseNames, previewX, buttonY + 42, panelWidth, 0));
         }
-        selectedHelp = "Preview face glow uses the phase hue at full brightness. Arrows move Both/Left/Right; eye spacing is separate. Pupils use eye-local offsets (-1 = automatic); Reset restores automatic placement. Scale X/Y is independent: eye 1 = 2 pixels, pupil 1 = 1 pixel. Save stores changes.";
+        selectedHelp = "Preview face glow uses the phase hue at full brightness. Arrows move Both/Left/Right; eye spacing is separate. Brow rotations are clockwise, -45° to 45°; Reset keeps the expression but resets position and rotation. Pupils use eye-local offsets (-1 = automatic); Reset restores automatic placement. Scale X/Y is independent: eye 1 = 2 pixels, pupil 1 = 1 pixel. Save stores changes.";
     }
 
     private String faceSelection(FacePart part) {
@@ -701,12 +720,17 @@ public final class ClockworkBossTemplateScreen extends Screen {
             int half = (panelWidth - 16) / 2;
             eyeButton(contentX + 6, y + 92, half, "Narrower", () -> spaceEyes(false));
             eyeButton(contentX + half + 10, y + 92, half, "Wider", () -> spaceEyes(true));
+        } else if (part == FacePart.BROWS) {
+            int half = (panelWidth - 16) / 2;
+            eyeButton(contentX + 6, y + 92, half, "Rotate -5°", () -> rotateBrows(-5));
+            eyeButton(contentX + half + 10, y + 92, half, "Rotate +5°", () -> rotateBrows(5));
         }
     }
     private void eyeButton(int x, int y, int buttonWidth, String text, Runnable action) {
         if (y >= top && y + CONTROL_HEIGHT <= bottom) addButton(x, y, buttonWidth, CONTROL_HEIGHT, text, action);
     }
-    /** Reset positioning keeps X/Y scale; normalize default positions to the current eye dimensions. */
+    /** Reset positions keeps eye/pupil scale and the chosen expression. Selected
+     * brows also reset to zero rotation; eye positions respect current dimensions. */
     private void resetFace(FacePart part) {
         String selection = faceSelection(part);
         boolean brows = part == FacePart.BROWS;
@@ -720,6 +744,7 @@ public final class ClockworkBossTemplateScreen extends Screen {
             int y = brows ? (side.equals("left") ? browDefaults.leftY() : browDefaults.rightY()) : (side.equals("left") ? defaults.leftY() : defaults.rightY());
             if (part == FacePart.PUPILS) x = y = -1; // Reset only position, keeping pupil size/enabled.
             inputs.put(root + side + "_x", Integer.toString(x)); inputs.put(root + side + "_y", Integer.toString(y));
+            if (brows) inputs.put(root + side + "_rotation", "0"); // Keep the chosen expression; reset its alignment.
         }
         focusPath = null; confirmingClose = false; rebuild();
     }
@@ -729,6 +754,8 @@ public final class ClockworkBossTemplateScreen extends Screen {
         else if (path.equals("__brow")) previewBrow = value;
         else if (path.equals("__pupil")) previewPupil = value;
         else if (path.equals("__phase")) previewPhase = value;
+        else if (path.equals("__face_event")) previewFaceEvent = value;
+        else if (path.equals("__face_sample")) previewFaceSample = value;
         else if (clockwork.bosses.ClockworkBossActionEditor.typePath(path)) {
             String child = path.substring(0, path.length() - 5);
             clockwork.bosses.ClockworkBossActionEditor.changeType(draft, child, value);
@@ -737,6 +764,19 @@ public final class ClockworkBossTemplateScreen extends Screen {
         if (path.equals("activation.type") && value.equals("player_enter_area")) inputs.put("activation.shape", "box");
         if (path.equals("loot.source")) buildSections();
         confirmingClose = false; focusPath = null; rebuild();
+    }
+
+    /** The shared Both/Left/Right selector also scopes the rotation shortcuts.
+     * Numeric fields remain available for precise one-degree edits. */
+    private void rotateBrows(int degrees) {
+        var brows = currentBrows(); String selected = faceSelection(FacePart.BROWS);
+        for (String side : List.of("left", "right")) {
+            if (!selected.equals("Both") && !selected.equalsIgnoreCase(side)) continue;
+            int angle = side.equals("left") ? brows.leftRotation() : brows.rightRotation();
+            inputs.put("skin.glowing_eyebrows." + side + "_rotation", Integer.toString(Math.clamp(angle + degrees,
+                    clockwork.bosses.ClockworkBossBrows.MIN_ROTATION, clockwork.bosses.ClockworkBossBrows.MAX_ROTATION)));
+        }
+        focusPath = null; confirmingClose = false; rebuild();
     }
 
     /** Movement edits scalars only; native metadata/mask generation receives bounded positions on Save. */
@@ -813,7 +853,7 @@ public final class ClockworkBossTemplateScreen extends Screen {
                 marker.clockworkBosses$setCustomSkinFile(skin.get("file").getAsString());
                 marker.clockworkBosses$setTemplate("__gui_" + token);
                 marker.clockworkBosses$setEyes(currentEyes().packed());
-                marker.clockworkBosses$setBrows(currentBrows().packed());
+                marker.clockworkBosses$setBrows(previewBrows().packed());
                 marker.clockworkBosses$setPupils(currentPupils().packed());
                 String colorPath = "phases." + previewPhase + ".warden_effects.color";
                 JsonElement color = ClockworkBossEditorSchema.get(draft, colorPath);
@@ -1008,7 +1048,40 @@ public final class ClockworkBossTemplateScreen extends Screen {
     private clockwork.bosses.ClockworkBossBrows currentBrows() {
         var saved = clockwork.bosses.ClockworkBossBrows.read(draft); String root = "skin.glowing_eyebrows.";
         return new clockwork.bosses.ClockworkBossBrows(faceCoordinate(root, "left_x", saved.leftX(), 12), faceCoordinate(root, "left_y", saved.leftY(), 12),
-                faceCoordinate(root, "right_x", saved.rightX(), 12), faceCoordinate(root, "right_y", saved.rightY(), 12));
+                faceCoordinate(root, "right_x", saved.rightX(), 12), faceCoordinate(root, "right_y", saved.rightY(), 12),
+                clockwork.bosses.ClockworkBossBrows.Expression.read(inputs.getOrDefault(root + "expression", saved.expression().name())),
+                faceCoordinate(root, "left_rotation", saved.leftRotation(), clockwork.bosses.ClockworkBossBrows.MIN_ROTATION, clockwork.bosses.ClockworkBossBrows.MAX_ROTATION),
+                faceCoordinate(root, "right_rotation", saved.rightRotation(), clockwork.bosses.ClockworkBossBrows.MIN_ROTATION, clockwork.bosses.ClockworkBossBrows.MAX_ROTATION));
+    }
+
+    /** Still preview of a rule, without timers/random draws or document writes.
+     * Base editing controls continue to move the real anchors/angles. */
+    private clockwork.bosses.ClockworkBossBrows previewBrows() {
+        var base = currentBrows(); String events = "skin.glowing_eyebrows.events.";
+        if (previewFaceEvent.equals("base") || !effectiveText(events + "enabled", "false").equals("true")) return base;
+        boolean rest = previewFaceEvent.equals("rest");
+        if (rest && !effectiveText(events + "random_between_attacks", "false").equals("true")) return base;
+        String rule = events + previewFaceEvent + ".";
+        String shape = rest ? "random" : effectiveText(rule + "expression", "inherit");
+        if (shape.equals("random")) {
+            var pool = previewFacePool();
+            shape = pool.contains(previewFaceSample) ? previewFaceSample : pool.getFirst();
+        }
+        var expression = shape.equals("inherit") || shape.equals("<inherit>") || shape.equals("base") ? base.expression()
+                : clockwork.bosses.ClockworkBossBrows.Expression.read(shape);
+        int left = rest ? base.leftRotation() : previewFaceRotation(rule, "left_rotation", base.leftRotation());
+        int right = rest ? base.rightRotation() : previewFaceRotation(rule, "right_rotation", base.rightRotation());
+        return new clockwork.bosses.ClockworkBossBrows(base.leftX(), base.leftY(), base.rightX(), base.rightY(), expression, left, right);
+    }
+    private List<String> previewFacePool() {
+        var pool = new ArrayList<String>(4);
+        for (String shape : List.of("angry", "neutral", "curious", "sad"))
+            if (!effectiveText("skin.glowing_eyebrows.events.random_pool." + shape, "true").equals("false")) pool.add(shape);
+        return pool.isEmpty() ? List.of("base") : pool;
+    }
+    private int previewFaceRotation(String rule, String key, int fallback) {
+        try { return Math.clamp(Integer.parseInt(effectiveText(rule + key, Integer.toString(fallback))), -45, 45); }
+        catch (NumberFormatException invalid) { return fallback; }
     }
 
     /** Dropdown is a real selectable overlay; clicks are intercepted so covered fields cannot be edited. */

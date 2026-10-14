@@ -11,7 +11,9 @@ does not count as passed. Repeat relevant sections after fixing a failure.
 - Use a separate test world/server and copies of templates you can change freely.
   Several checks deliberately kill players, remove bosses or restart the server.
 - Install matching core builds on the server and modded clients. The current
-  core is `0.2.0-beta.3`. Keep one core jar in each mods folder.
+  development core is `0.3.0-beta.2`; the release remains `0.2.0`.
+  Keep one core jar in each mods folder. The latest compatibility checks and a
+  short focused checklist are in [Better Combat testing](BETTER_COMBAT_TESTING.md).
 - Use Survival for players taking part in the fight. An operator can switch to
   Creative for setup, but Creative/Spectator players are not normal attack targets.
 - Bring a second player or account for targeting, late joins and shared-state
@@ -216,6 +218,31 @@ hits, which is a different condition from an attack completing.
 
 ## Player health and arena effects
 
+### Encounter PvP protection (0.3 preview)
+
+Use at least two survival players with server PvP enabled. Configure
+`boss_bar.pvp_protection.enabled: true` and a known box/radius. Confirm both
+directions of harm, including one player outside the arena.
+
+- [ ] Dormant boss: ordinary PvP still works. Activate it: protection starts
+  during emergence. Helpful healing/buffs and boss attacks still work.
+- [ ] Melee, sweep bystanders, critical hits, flaming/tipped arrows, tridents,
+  Channeling lightning, harmful splash/lingering potions and player-attributed explosions do no player
+  damage, harmful effects or knockback. The same attacks can still affect mobs.
+- [ ] Leave/re-enter the arena: boundaries apply immediately, including shots
+  already in flight. With both players outside all protected arenas, PvP works.
+- [ ] Move a radius-based boss; protection follows its configured arena anchor.
+  Fixed boxes stay fixed. Test different dimensions and spectators too.
+- [ ] Remove/kill the boss, reload protection off/on, then repeat an attack.
+  Overlapping encounters retain protection until the last relevant one ends.
+- [ ] Fire/lava/falls still hurt, and self-inflicted damage remains native.
+  Existing poison is not erased on entry. Authorized `/effect give` still works.
+- [ ] Shooter logs out with an arrow/cloud/TNT in play: a protected participant
+  remains protected. Changing an arrow's owner does not retain stale attribution.
+- [ ] Repeat with a client without Clockwork Bosses, poor/high-latency connections,
+  then your combat mods. Record actual versions and results; native fixture
+  tests do not establish Better Combat/Combat Roll compatibility.
+
 - [ ] **First entry and late arrival.** Start while one player is outside, then
   have them enter injured. **Pass:** enabled minimum max health and first-entry
   healing apply to both initial participants and late arrivals.
@@ -239,8 +266,9 @@ hits, which is a different condition from an attack completing.
 ## Reusable fight potion and graves
 
 - [ ] **Personal offhand.** Enter carrying a shield or valuable named offhand
-  item. **Pass:** the fight potion is supplied, and the displaced item is
-  recoverable exactly once when support ends.
+  item. **Pass:** the item stays in its original slot; the potion uses a free
+  inventory slot and can be drunk from the main hand. Cleanup leaves equipment
+  untouched, including when Better Combat hides the offhand.
 - [ ] **One completed drink.** Take damage and reduce hunger, then finish one
   drink. **Pass:** the configured healing/food/saturation is granted once. The
   default healing is 20 HP and the default cooldown is 15 seconds.
@@ -257,11 +285,11 @@ hits, which is a different condition from an attack completing.
   in the offhand, then repeat with it in inventory. **Pass:** after the final
   eligible encounter ends, temporary bottles are removed and the original
   offhand item remains exactly once. Reopen inventory to check the real contents.
-- [ ] **Full inventory.** Repeat exit/removal with all slots occupied.
-  **Pass:** your original personal item is preserved through the supported
-  inventory/drop/recovery path rather than silently disappearing or duplicating.
+- [ ] **Full inventory.** Enter with all inventory slots and the offhand occupied.
+  **Pass:** no item is overwritten or dropped, no bottle is granted, and a message
+  explains freeing a slot and reentering. Repeat after freeing one slot.
 - [ ] **Death and grave recovery.** With the actual grave mod, die with a
-  personal offhand displaced, end the encounter, then recover the grave.
+  personal offhand equipped, end the encounter, then recover the grave.
   **Pass:** the grave has your personal items, not a usable temporary fight
   potion; recovery does not duplicate the original offhand.
 - [ ] **KeepInventory and a totem.** If used by your server, repeat with

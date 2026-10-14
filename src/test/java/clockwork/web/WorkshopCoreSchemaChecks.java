@@ -37,7 +37,26 @@ public final class WorkshopCoreSchemaChecks {
         if (!tree.getAsJsonObject("addon").get("huge").getAsString().equals("900719925474099312345")
                 || !tree.getAsJsonObject("addon").get("small").getAsString().equals("1.2300e-120")) throw new AssertionError("Unknown number tokens changed");
         new TemplateJson().inspect(bytes("{\"format_version\":1}"), true);
-        System.out.println("PASS: live core/addon schema validation, unknown number preservation and offline constructor");
+        // Exercise the actual file store and live-schema validator. A correct
+        // save/publish must retain these fields, not replace them with defaults.
+        var auraConfig = ClockworkBossTemplateDocument.defaults();
+        var aura = auraConfig.getAsJsonObject("phases").getAsJsonObject("annoyed").getAsJsonObject("darkness");
+        aura.addProperty("max_radius", 100);
+        aura.addProperty("edge_interval_ticks", 150); aura.addProperty("center_interval_ticks", 100);
+        aura.addProperty("edge_duration_ticks", 100); aura.addProperty("center_duration_ticks", 150);
+        var auraStore = new TemplateFiles(java.nio.file.Files.createTempDirectory(java.nio.file.Path.of("build").toAbsolutePath(), "darkness-publish-"), live);
+        byte[] editedAura = bytes(ClockworkBossTemplateFormat.writeJson(auraConfig));
+        var auraDraft = auraStore.save("darkness", editedAura, "none", "none");
+        auraStore.publish("darkness", auraDraft.revision());
+        if (!java.util.Arrays.equals(editedAura, auraStore.draft("darkness").content())
+                || !java.util.Arrays.equals(editedAura, auraStore.active("darkness").content()))
+            throw new AssertionError("Darkness values changed between saved draft and active publication");
+        var compiledAura = clockwork.bosses.ClockworkBossSettings.read(TemplateJson.parse(auraStore.active("darkness").content()))
+                .phase(clockwork.bosses.ClockworkBossPhase.ANNOYED).darkness();
+        if (compiledAura.maxRadius() != 100 || compiledAura.edgeInterval() != 150 || compiledAura.centerInterval() != 100
+                || compiledAura.edgeDuration() != 100 || compiledAura.centerDuration() != 150)
+            throw new AssertionError("Published darkness values did not reach compiled encounter settings");
+        System.out.println("PASS: live core/addon schema validation, unknown number preservation, offline constructor and darkness publication");
     }
     private static byte[] bytes(String text) { return text.getBytes(StandardCharsets.UTF_8); }
 }

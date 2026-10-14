@@ -30,18 +30,69 @@
     "type": "player",
     "name": "",
     "file": "",
-    // Top-left positions of the two 4x4 slanted eyebrow masks on the 16x16 head face. Coordinates are
-    // whole pixels 0-12; move eyebrows independently from the eyes. Missing settings keep the original
-    // positions. Preview face glow is brighter for alignment; fight brightness is unchanged.
+    // Choose an expression, then position and rotate each 4x4 eyebrow on the 16x16 face.
+    // Shape changes keep saved positions; rotated pixels clip to the face.
+    // expression: angry (default), neutral, curious, or sad. Curious raises the left brow.
+    // left_rotation / right_rotation: independent whole degrees -45 to 45; positive is clockwise.
+    // Zero rotation keeps the selected shape. Missing settings retain the original angry brows.
     // left_x: Left eyebrow X, 0-12; default 2.
     // left_y: Left eyebrow Y, 0-12; default 2. Larger values move down.
     // right_x: Right eyebrow X, 0-12; default 10.
     // right_y: Right eyebrow Y, 0-12; default 2.
     "glowing_eyebrows": {
+      "expression": "angry",
+      "left_rotation": 0,
+      "right_rotation": 0,
       "left_x": 2,
       "left_y": 2,
       "right_x": 10,
-      "right_y": 2
+      "right_y": 2,
+      // Optional combat expressions. Disabled keeps the static face; no independent random timer.
+      // Hit > attack/roar > new target > resting face. Hit expires back to the active attack.
+      // Durations: 1-12000 ticks; cooldowns: 0-12000. 20 ticks = 1 second.
+      // Expiry reuses the ten-tick watcher, so a pose may last up to nine extra ticks.
+      // Each rule: inherit (base), angry, neutral, curious, sad, or random from random_pool.
+      // Rule rotations: null keeps the base angle; whole degrees -45 to 45 override it.
+      // Random resting face changes once after a completed melee/beam; empty pool uses base.
+      "events": {
+        "enabled": false,
+        "hit_duration_ticks": 20,
+        "hit_cooldown_ticks": 20,
+        "target_duration_ticks": 20,
+        "target_cooldown_ticks": 20,
+        "random_between_attacks": false,
+        "random_pool": {
+          "angry": true,
+          "neutral": true,
+          "curious": true,
+          "sad": true
+        },
+        "melee": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        },
+        "sonic_boom": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        },
+        "roar": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        },
+        "hurt": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        },
+        "target_change": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        }
+      }
     },
     // Eye positions on the 16x16 front head face, measured in Warden atlas pixels from its top-left.
     // Default eyes are 2x2 with one darker pupil; independent X/Y scales change their size; eyebrows use
@@ -1126,6 +1177,7 @@
   // color: PINK, BLUE, RED, GREEN, YELLOW, PURPLE or WHITE.
   // overlay: PROGRESS, NOTCHED_6, NOTCHED_10, NOTCHED_12 or NOTCHED_20.
   "boss_bar": {
+    "pvp_protection": { "enabled": true },
     "color": "PURPLE",
     "overlay": "NOTCHED_20",
     // Infinite buffs only after activation, while inside the boss-bar area. Removed on exit/end;
@@ -1196,8 +1248,10 @@
       "minimum_max_health": 100.0,
       "heal_on_first_entry": true
     },
-    // Give an owner-bound offhand potion during an active encounter. Uses normal drinking time; bottle is
-    // reusable. An occupied offhand moves into a free inventory slot; full inventory prevents the gift.
+    // Give an owner-bound reusable potion during an active encounter. Uses normal drinking and one
+    // shared server cooldown. Empty usable offhand: give it there. Occupied or two-handed-hidden
+    // offhand: use a free inventory slot and drink from the main hand. Equipment stays in place.
+    // No usable free slot: no gift; free a slot and reenter. Cleanup also reads hidden backing slots.
     // enabled: Enable the potion independently of beacon effects and fight health. Default true in new
     // templates; absent section is disabled.
     // heal_hp: HP restored after drinking, 0-1000; default 20 HP (10 hearts). Cannot exceed current max

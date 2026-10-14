@@ -22,9 +22,14 @@ public abstract class RoarMixin {
     @Unique private long clockworkBosses$generation = -1;
     @Unique private boolean clockworkBosses$wasCooling;
     @Unique private long clockworkBosses$remainingCooldown;
+    @Unique private long clockworkBosses$faceToken;
     @Inject(method = "start(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/entity/monster/warden/Warden;J)V", at = @At("TAIL"))
     private void clockworkBosses$started(ServerLevel level, Warden boss, long now, CallbackInfo ci) {
         clockworkBosses$generation = ClockworkBossManager.roarInterludeToken(boss);
+        // Observe the actual native roar for its whole 84-tick animation; this
+        // also supports ordinary anger roars on a marked active boss.
+        clockworkBosses$faceToken = ClockworkBossManager.beginFaceAttack(boss,
+                clockwork.bosses.ClockworkBossFaceEvents.Attack.ROAR, now, 84);
         if (clockworkBosses$generation >= 0 && clockwork.bosses.ClockworkBossDiagnostics.enabled())
             clockwork.bosses.ClockworkBossDiagnostics.event(boss, boss.getTarget(), "roar_native_start", "captured_generation", clockworkBosses$generation);
     }
@@ -51,6 +56,8 @@ public abstract class RoarMixin {
     @Inject(method = "stop(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/world/entity/monster/warden/Warden;J)V", at = @At("TAIL"))
     private void clockworkBosses$finished(ServerLevel level, Warden boss, long now, CallbackInfo ci) {
         long token = clockworkBosses$generation; clockworkBosses$generation = -1;
+        ClockworkBossManager.cancelFaceAttack(boss, clockworkBosses$faceToken);
+        clockworkBosses$faceToken = 0;
         if (token >= 0 && clockwork.bosses.ClockworkBossDiagnostics.enabled())
             clockwork.bosses.ClockworkBossDiagnostics.event(boss, boss.getTarget(), "roar_native_stop", "captured_generation", token, "remaining_sonic_cooldown", clockworkBosses$remainingCooldown);
         // Native stop uses a method-reference target assignment and installs a

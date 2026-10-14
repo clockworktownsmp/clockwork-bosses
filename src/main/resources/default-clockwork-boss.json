@@ -5,10 +5,52 @@
     "name": "",
     "file": "",
     "glowing_eyebrows": {
+      "expression": "angry",
+      "left_rotation": 0,
+      "right_rotation": 0,
       "left_x": 2,
       "left_y": 2,
       "right_x": 10,
-      "right_y": 2
+      "right_y": 2,
+      "events": {
+        "enabled": false,
+        "hit_duration_ticks": 20,
+        "hit_cooldown_ticks": 20,
+        "target_duration_ticks": 20,
+        "target_cooldown_ticks": 20,
+        "random_between_attacks": false,
+        "random_pool": {
+          "angry": true,
+          "neutral": true,
+          "curious": true,
+          "sad": true
+        },
+        "melee": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        },
+        "sonic_boom": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        },
+        "roar": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        },
+        "hurt": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        },
+        "target_change": {
+          "expression": "inherit",
+          "left_rotation": null,
+          "right_rotation": null
+        }
+      }
     },
     "glowing_eyes": {
       "scale_x": 1.0,
@@ -436,6 +478,9 @@
     }
   },
   "boss_bar": {
+    "pvp_protection": {
+      "enabled": true
+    },
     "color": "PURPLE",
     "overlay": "NOTCHED_20",
     "area_effects": {
@@ -485,7 +530,42 @@
   },
   "_documentation": {
     "format_version": "Template format revision, written automatically. Missing means legacy revision 1; unsupported revisions are rejected. Do not change it manually.",
-    "skin.glowing_eyebrows": "Top-left positions of the two 4x4 slanted eyebrow masks on the 16x16 head face. Coordinates are whole pixels 0-12; move eyebrows independently from the eyes. Missing settings keep the original positions. Preview face glow is brighter for alignment; fight brightness is unchanged.",
+    "skin.glowing_eyebrows": "Choose a static expression, then position and rotate each 4x4 eyebrow independently on the 16x16 head face. Left/right refer to the face preview. Shape changes keep saved positions; rotated pixels clip to the face. Missing settings keep the original angry brows with zero rotation.",
+    "skin.glowing_eyebrows.expression": "angry: inward slants; neutral: flat brows; curious: raised arched left brow and flatter right brow; sad: outward slants. Default angry.",
+    "skin.glowing_eyebrows.left_rotation": "Left eyebrow rotation in whole degrees, -45 to 45. Positive rotates clockwise; zero keeps the selected shape. Small changes can look identical on the pixel grid. Default 0.",
+    "skin.glowing_eyebrows.right_rotation": "Right eyebrow rotation in whole degrees, -45 to 45. Independent of the left eyebrow. Default 0.",
+    "skin.glowing_eyebrows.events": "Optional event-driven expressions. Hit briefly overrides attack/roar, then returns to it; attack overrides new target, which overrides rest. Positions stay at the base anchors. Expiry reuses the ten-tick watcher: up to nine extra ticks. Reload, health-phase changes and encounter end clear transient poses; attack cancellation clears that attack pose. Disabled/missing keeps the static face.",
+    "skin.glowing_eyebrows.events.enabled": "Enable combat expressions. Default false keeps the static expression.",
+    "skin.glowing_eyebrows.events.hit_duration_ticks": "How long a player hit reaction lasts. Whole ticks 1-12000; 20 = one second. Default 20.",
+    "skin.glowing_eyebrows.events.hit_cooldown_ticks": "Minimum time between hit reactions. Extra hits do not extend the pose. Whole ticks 0-12000; 0 reacts to each accepted hit. Default 20.",
+    "skin.glowing_eyebrows.events.target_duration_ticks": "How long the new-target pose lasts. It is hidden by an attack or hit reaction. Whole ticks 1-12000; default 20.",
+    "skin.glowing_eyebrows.events.target_cooldown_ticks": "Minimum time between new-target reactions. Whole ticks 0-12000; default 20.",
+    "skin.glowing_eyebrows.events.random_between_attacks": "Choose a resting expression once after each completed melee swing or sonic beam. Never uses a periodic random timer. Cancelled attempts do not roll. Default false.",
+    "skin.glowing_eyebrows.events.random_pool": "Shapes available to random rules and random resting expressions. At most four choices; if all are false, use the base shape.",
+    "skin.glowing_eyebrows.events.random_pool.angry": "Include angry in random choices. Default true.",
+    "skin.glowing_eyebrows.events.random_pool.neutral": "Include neutral in random choices. Default true.",
+    "skin.glowing_eyebrows.events.random_pool.curious": "Include curious in random choices. Default true.",
+    "skin.glowing_eyebrows.events.random_pool.sad": "Include sad in random choices. Default true.",
+    "skin.glowing_eyebrows.events.melee": "Melee wind-up and recovery. Shape/angle overrides affect only the glow face, never AI or damage.",
+    "skin.glowing_eyebrows.events.melee.expression": "inherit uses the base shape; angry, neutral, curious, sad select a shape; random samples random_pool once for this event. Default inherit.",
+    "skin.glowing_eyebrows.events.melee.left_rotation": "Left eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base left rotation.",
+    "skin.glowing_eyebrows.events.melee.right_rotation": "Right eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base right rotation.",
+    "skin.glowing_eyebrows.events.sonic_boom": "Sonic boom wind-up and recovery. Shape/angle overrides affect only the glow face, never AI or damage.",
+    "skin.glowing_eyebrows.events.sonic_boom.expression": "inherit uses the base shape; angry, neutral, curious, sad select a shape; random samples random_pool once for this event. Default inherit.",
+    "skin.glowing_eyebrows.events.sonic_boom.left_rotation": "Left eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base left rotation.",
+    "skin.glowing_eyebrows.events.sonic_boom.right_rotation": "Right eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base right rotation.",
+    "skin.glowing_eyebrows.events.roar": "Native roar animation. Shape/angle overrides affect only the glow face, never AI or damage.",
+    "skin.glowing_eyebrows.events.roar.expression": "inherit uses the base shape; angry, neutral, curious, sad select a shape; random samples random_pool once for this event. Default inherit.",
+    "skin.glowing_eyebrows.events.roar.left_rotation": "Left eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base left rotation.",
+    "skin.glowing_eyebrows.events.roar.right_rotation": "Right eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base right rotation.",
+    "skin.glowing_eyebrows.events.hurt": "Accepted nonfatal damage from a player or player-owned projectile. Shape/angle overrides affect only the glow face, never AI or damage.",
+    "skin.glowing_eyebrows.events.hurt.expression": "inherit uses the base shape; angry, neutral, curious, sad select a shape; random samples random_pool once for this event. Default inherit.",
+    "skin.glowing_eyebrows.events.hurt.left_rotation": "Left eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base left rotation.",
+    "skin.glowing_eyebrows.events.hurt.right_rotation": "Right eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base right rotation.",
+    "skin.glowing_eyebrows.events.target_change": "A real new target assignment. Shape/angle overrides affect only the glow face, never AI or damage.",
+    "skin.glowing_eyebrows.events.target_change.expression": "inherit uses the base shape; angry, neutral, curious, sad select a shape; random samples random_pool once for this event. Default inherit.",
+    "skin.glowing_eyebrows.events.target_change.left_rotation": "Left eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base left rotation.",
+    "skin.glowing_eyebrows.events.target_change.right_rotation": "Right eyebrow angle, whole degrees -45 to 45; positive clockwise. Null/missing keeps the base right rotation.",
     "skin.glowing_eyebrows.left_x": "Left eyebrow X, 0-12; default 2.",
     "skin.glowing_eyebrows.left_y": "Left eyebrow Y, 0-12; default 2. Larger values move down.",
     "skin.glowing_eyebrows.right_x": "Right eyebrow X, 0-12; default 10.",
@@ -596,6 +676,8 @@
     "phases.<phase>.darkness.center_amplifier": "Keep at 0. Priority between overlapping Darkness effects only; does not increase visual darkness or set priority against Night Vision. Center effect priority, 0-4; blended toward edge with distance. 0 = normal. null/missing inherits the legacy base or safe default.",
     "darkness": "Legacy base aura fallback; missing phase fields inherit it. Prefer per-phase settings.",
     "boss_bar": "Boss bar after activation; /boss select arena <template> sets its shared visibility and player-effect area. No selected area means no bar.",
+    "boss_bar.pvp_protection": "Player-to-player protection inside this active arena. Boss attacks, ordinary hazards, helpful effects and self-inflicted damage remain native. Missing/null legacy settings disable protection.",
+    "boss_bar.pvp_protection.enabled": "true blocks player-caused damage and new harmful effects in both directions if either player is in this active arena. Includes melee/sweeps, owned projectiles and attributed blasts; stops on exit or encounter end. Helpful buffs and operator effect commands remain allowed. Pre-existing effects and source-less fire/lava remain environmental; this does not track placed blocks. /boss reload applies edits.",
     "boss_bar.color": "PINK, BLUE, RED, GREEN, YELLOW, PURPLE or WHITE.",
     "boss_bar.overlay": "PROGRESS, NOTCHED_6, NOTCHED_10, NOTCHED_12 or NOTCHED_20.",
     "boss_bar.visibility_area": "Who sees the bar and receives configured area effects after activation. Choose a saved box or a 3D radius that follows this Warden. The existing ten-tick watcher checks both; no additional timer. Missing box bounds leave box visibility unset.",
@@ -740,7 +822,7 @@
     "boss_bar.player_health.enabled": "Enable the health minimum independently of beacon effects; default true in new templates. Missing section in older files is disabled.",
     "boss_bar.player_health.minimum_max_health": "Minimum maximum HP, 1-1000; default 100 HP (50 hearts). This is a floor, not extra health added to armor.",
     "boss_bar.player_health.heal_on_first_entry": "Fully heal once per player per encounter, including late arrivals. Reentry, reconnect and reload do not repeat it. Saved on the boss; capped at 4096 participants.",
-    "boss_bar.reusable_potion": "Give an owner-bound offhand potion during an active encounter. Uses normal drinking time; bottle is reusable. An occupied offhand moves into a free inventory slot; full inventory prevents the gift.",
+    "boss_bar.reusable_potion": "Give an owner-bound reusable potion during an active encounter. Uses normal drinking and a shared server cooldown. An empty usable offhand gets it; occupied or two-handed-inaccessible offhands use an empty inventory slot instead. Equip it in the main hand to drink. Equipment is never moved, overwritten or dropped; no usable space prevents the gift.",
     "boss_bar.reusable_potion.enabled": "Enable the potion independently of beacon effects and fight health. Default true in new templates; absent section is disabled.",
     "boss_bar.reusable_potion.heal_hp": "HP restored after drinking, 0-1000; default 20 HP (10 hearts). Cannot exceed current max health.",
     "boss_bar.reusable_potion.cooldown_seconds": "Time after a completed drink before another dose, 0.05-600 game seconds; default 15. Shared by all copies and overlapping encounters; survives exit, reconnect and respawn.",

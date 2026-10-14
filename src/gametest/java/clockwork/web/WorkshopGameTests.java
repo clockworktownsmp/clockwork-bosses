@@ -73,7 +73,7 @@ public final class WorkshopGameTests {
         helper.succeed();
     }
 
-    @GameTest(maxTicks = 300) public void item_snapshot_uses_native_batches(GameTestHelper helper) {
+    @GameTest(maxTicks = 12000) public void item_snapshot_uses_native_batches(GameTestHelper helper) {
         var server = helper.getLevel().getServer();
         try { WorkshopItemSnapshot.capture(server); throw new AssertionError("Capture blocked the native thread"); }
         catch (java.io.IOException expected) { }
@@ -82,6 +82,13 @@ public final class WorkshopGameTests {
             catch (java.io.IOException failure) { throw new java.util.concurrent.CompletionException(failure); }
         }, net.minecraft.util.Util.ioPool());
         helper.succeedWhen(() -> {
+            // GameTestServer runs ticks without the normal 50 ms wait. A 300
+            // tick deadline sometimes expired in 34 ms, starving the genuine
+            // IO worker. Yield briefly ONLY in this fixture while it is pending;
+            // capture's real 2-second batch / 30-second total budgets still fail
+            // normally. Never wait for a native task from the server thread.
+            if (!pending.isDone()) java.util.concurrent.locks.LockSupport.parkNanos(
+                    java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(5));
             helper.assertTrue(pending.isDone(), "Native item batches still completing");
             com.google.gson.JsonObject result;
             try { result = pending.join().page("/api/items/0/_/_"); }

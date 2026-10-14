@@ -48,7 +48,10 @@ public final class ClockworkBossState {
     private ClockworkBossSettings settings;
     private ClockworkBossAreaEffects.Settings areaEffects;
     private ClockworkBossPlayerSupport playerSupport;
+    private ClockworkBossPvp.Settings pvpProtection;
     private ClockworkBossMusic.Settings music;
+    // One controller per loaded boss; no retained entities or independent timer.
+    private final ClockworkBossFaceEvents face = new ClockworkBossFaceEvents();
     // Region parsing is a configuration operation, never watcher work.
     private Areas areas;
     // The dormant trigger stays at the visible emergence point, independent of burial/scale.
@@ -194,6 +197,7 @@ public final class ClockworkBossState {
         shuffledSubphases = null; shuffleCursor = 0;
         pendingMelee = null;
         recoveryDeadline = -1;
+        face.clear();
     }
 
     // One UUID/time/count per boss, not per player. Assignment and completed
@@ -324,6 +328,8 @@ public final class ClockworkBossState {
         var compiledSubphases = ClockworkBossSubphases.read(config, compiled);
         ClockworkBossAreaEffects.Settings compiledAreaEffects = ClockworkBossAreaEffects.Settings.read(config);
         var compiledSupport = ClockworkBossPlayerSupport.read(config);
+        var compiledPvp = ClockworkBossPvp.Settings.read(config);
+        var compiledFace = ClockworkBossFaceEvents.Settings.read(config);
         Areas compiledAreas = ClockworkBossManager.readAreas(config);
         if (!stopActionForTransition(clockwork.bosses.api.BossAction.StopReason.RELOADED)) return false;
         // Editing a trigger/radius starts a fresh occupancy baseline. Players
@@ -341,7 +347,9 @@ public final class ClockworkBossState {
         resetSubphase();
         this.areaEffects = compiledAreaEffects;
         this.playerSupport = compiledSupport;
+        this.pvpProtection = compiledPvp;
         this.music = ClockworkBossMusic.Settings.read(config);
+        face.configure(compiledFace);
         this.areas = compiledAreas;
         double radius = compiledAreas.activationRadius();
         activationRadiusBox = new AABB(emergenceCenter.x - radius, emergenceCenter.y - radius, emergenceCenter.z - radius,
@@ -354,8 +362,13 @@ public final class ClockworkBossState {
     /** Area buffs are compiled once, then consumed only when viewers enter/leave or templates reload. */
     public ClockworkBossAreaEffects.Settings areaEffects() { return areaEffects; }
     public ClockworkBossPlayerSupport playerSupport() { return playerSupport; }
+    /** Damage/effect boundaries read this compiled flag, never template JSON. */
+    public ClockworkBossPvp.Settings pvpProtection() { return pvpProtection; }
     /** Music is compiled on config changes, then compared only during the existing arena membership scan. */
     public ClockworkBossMusic.Settings music() { return music; }
+    /** Native combat events and the existing watcher share this controller.
+     * Its rules are compiled; mutable poses/deadlines belong to this state. */
+    public ClockworkBossFaceEvents face() { return face; }
     /** Immutable native boxes/keys keep the ten-tick checks free of JSON parsing and box reconstruction. */
     public Areas areas() { return areas; }
     /** Cached fixed-radius query avoids rebuilding a box on every dormant watcher check. */

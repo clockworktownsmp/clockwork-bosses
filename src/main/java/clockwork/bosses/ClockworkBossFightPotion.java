@@ -15,7 +15,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
@@ -25,6 +24,8 @@ import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.ItemLore;
 import net.minecraft.world.item.component.UseCooldown;
 import net.minecraft.world.item.component.TooltipDisplay;
+import net.minecraft.world.entity.player.Inventory;
+import clockwork.bosses.compat.ClockworkBossBetterCombat;
 
 /** One owner-bound reusable vanilla bottle per participant. Native drinking and
  * cooldown UI handle presentation; the server alone validates and grants a dose.
@@ -38,8 +39,6 @@ public final class ClockworkBossFightPotion {
         final ServerPlayer player;
         final Map<UUID, ClockworkBossPlayerSupport.Potion> bosses = new HashMap<>();
         ClockworkBossPlayerSupport.Potion policy;
-        int displacedSlot = -1;
-        ItemStack displaced;
         Member(ServerPlayer player) { this.player = player; }
     }
 
@@ -140,9 +139,8 @@ public final class ClockworkBossFightPotion {
                 "requested_hunger", policy.hunger(), "requested_saturation", policy.saturation(), "cooldown_ticks", policy.cooldownTicks());
     }
 
-    /** Move an occupied offhand into a free native inventory slot. Snapshot its
-     * contents for later ownership checks: other mods can copy stacks during
-     * inventory operations. A full inventory prevents the gift, never deletion. */
+    /** Only insert the owned bottle into an empty backing slot. Equipment stays
+     * where the player put it; no displacement snapshot or restoration exists. */
     public static void enter(UUID boss, ServerPlayer player, ClockworkBossPlayerSupport.Potion settings) {
         if (!settings.enabled()) { leave(boss, player.getUUID()); return; }
         Member member = PLAYERS.get(player.getUUID());
@@ -163,37 +161,25 @@ public final class ClockworkBossFightPotion {
             ItemStack stack = inventory.getItem(slot);
             if (owned(stack, player.getUUID())) { decorate(stack, player.getUUID(), member.policy); found = true; }
         }
+        if (owned(player.containerMenu.getCarried(), player.getUUID())) {
+            decorate(player.containerMenu.getCarried(), player.getUUID(), member.policy); found = true;
+        }
         if (!found) {
-            ItemStack offhand = player.getOffhandItem();
-            if (!offhand.isEmpty()) {
-                int slot = inventory.getFreeSlot();
-                if (slot < 0) {
-                    if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.entity(player, "potion_gift_rejected", "reason", "full_inventory");
-                    player.sendSystemMessage(Component.literal("Make one inventory slot free and reenter the arena to receive your fight potion.").withStyle(ChatFormatting.YELLOW));
-                    return;
-                }
-                // Native add consumes the held input while moving it to the
-                // free slot. Avoid temporarily sharing one mutable stack between
-                // offhand and inventory: stack-merging mods can change that input.
-                // A refused/partial transfer keeps all remaining items and gives
-                // no bottle; the comparison snapshot is never issued as an item.
-                if (!inventory.add(slot, offhand) || !offhand.isEmpty() || !player.getOffhandItem().isEmpty()
-                        || inventory.getItem(slot).isEmpty()) {
-                    if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.entity(player, "potion_gift_rejected", "reason", "inventory_transfer_refused");
-                    return;
-                }
-                member.displacedSlot = slot;
-                // Snapshot the actual stored result: inventory integrations may
-                // normalize components (the pack makes stored totems stackable).
-                // Later edits/moves still invalidate restoration; only the live
-                // stored item can be moved back, never these comparison bytes.
-                member.displaced = inventory.getItem(slot).copy();
-                if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.entity(player, "offhand_displaced", "inventory_slot", slot);
+            // getOffhandItem can be EMPTY while BC hides a stored shield. Native
+            // Inventory.getItem accesses EntityEquipment directly in 26.3.
+            boolean offhand = inventory.getItem(Inventory.SLOT_OFFHAND).isEmpty()
+                    && ClockworkBossBetterCombat.offhandUsable(player);
+            int slot = offhand ? Inventory.SLOT_OFFHAND : inventory.getFreeSlot();
+            if (slot < 0 || !inventory.getItem(slot).isEmpty()) {
+                if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.entity(player, "potion_gift_rejected", "reason", "full_inventory");
+                player.sendSystemMessage(Component.literal("No usable slot for your fight potion. Free an inventory slot and reenter the arena; your equipment was left in place.").withStyle(ChatFormatting.YELLOW));
+                return;
             }
             ItemStack bottle = new ItemStack(Items.POTION);
             decorate(bottle, player.getUUID(), member.policy);
-            player.setItemInHand(InteractionHand.OFF_HAND, bottle);
-            if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.entity(player, "potion_gift", "encounter_count", member.bosses.size());
+            inventory.setItem(slot, bottle); inventory.setChanged();
+            if (!offhand) player.sendSystemMessage(Component.literal("Fight potion placed in your inventory. Move it to your main hand to drink; your offhand equipment stays in place.").withStyle(ChatFormatting.YELLOW));
+            if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.entity(player, "potion_gift", "encounter_count", member.bosses.size(), "inventory_slot", slot);
         }
         long remaining = Math.max(0, ((ClockworkBossPlayerData) player).clockworkBosses$potionReadyTick() - now(player));
         if (remaining > 0) player.getCooldowns().addCooldown(GROUP, (int) Math.min(12000, remaining));
@@ -236,8 +222,8 @@ public final class ClockworkBossFightPotion {
     }
     /** A committed player death must release the temporary bottle BEFORE native
      * death loot runs: grave mods capture inventory there, before AFTER_DEATH.
-     * Restore only the unchanged live offhand item, so the grave saves the
-     * player's real inventory. All this player's overlapping grants end; the
+     * Personal equipment was never moved, so the grave saves its original slot.
+     * All this player's overlapping grants end; the
      * later membership/respawn callbacks are harmless after this first release.
      * An untracked copy is also cleared, without syncing unaffected players. */
     public static void beforeDeathDrops(ServerPlayer player) {
@@ -248,31 +234,6 @@ public final class ClockworkBossFightPotion {
         Member member = PLAYERS.remove(player);
         if (member == null) return;
         clearBottles(member.player);
-        // Restore unchanged item contents in the recorded slot, into an empty
-        // offhand. Identity is not reliable when another mod copies a stack.
-        // Remove and transfer the live slot contents; the snapshot is comparison
-        // data only and is never given back, preventing a duplicated/stale item.
-        var inventory = member.player.getInventory();
-        if (member.displaced != null && member.player.getOffhandItem().isEmpty()
-                && sameDisplacedContents(inventory.getItem(member.displacedSlot), member.displaced)) {
-            ItemStack restored = inventory.removeItemNoUpdate(member.displacedSlot);
-            member.player.setItemInHand(InteractionHand.OFF_HAND, restored);
-            if (ClockworkBossDiagnostics.enabled()) ClockworkBossDiagnostics.entity(member.player, "offhand_restored", "inventory_slot", member.displacedSlot);
-            sync(member.player);
-        }
-    }
-    /** Stackable-totem integrations can change capacity after storage/sync.
-     * Capacity is not item ownership: permit only that component difference,
-     * while requiring the exact count, item and all remaining components.
-     * The transferred live stack keeps its current capacity and other data;
-     * the comparison copy is never inserted into a player's inventory. */
-    private static boolean sameDisplacedContents(ItemStack current, ItemStack saved) {
-        if (current.isEmpty() || current.getCount() != saved.getCount()) return false;
-        if (ItemStack.isSameItemSameComponents(current, saved)) return true;
-        if (current.getMaxStackSize() == saved.getMaxStackSize()) return false;
-        ItemStack comparison = saved.copy();
-        comparison.set(DataComponents.MAX_STACK_SIZE, current.getMaxStackSize());
-        return ItemStack.isSameItemSameComponents(current, comparison);
     }
     /** Event-boundary inventory cleanup only. Containers in the world are not
      * scanned; any stored copy remains owner-locked and unusable outside a fight. */

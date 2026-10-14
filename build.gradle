@@ -6,6 +6,12 @@ plugins {
 version = project.mod_version
 group = project.maven_group
 
+// Never infer a deployment host from a prerelease suffix. Missing/invalid build
+// input fails packaging; the released 0.2.0 jar remains a separate stable artifact.
+if (!(project.workshop_build_channel in ['stable', 'beta', 'development'])) {
+    throw new GradleException('workshop_build_channel must be stable, beta, or development')
+}
+
 base {
     archivesName = project.archives_base_name
 }
@@ -38,8 +44,18 @@ dependencies {
     include implementation('org.jcraft:jorbis:0.0.17')
 }
 
+// Public pinned artifact for isolated compatibility checks. Never bundle this
+// third-party mod or turn it into a required runtime dependency.
+repositories {
+    maven {
+        url = 'https://api.modrinth.com/maven'
+        content { includeModule('maven.modrinth', 'better-combat') }
+    }
+}
+
 // Capture version properties during configuration, not inside a running task.
 def modResourceProperties = [version: project.version.toString(),
+        workshop_build_channel: project.workshop_build_channel.toString(),
         minecraft_version: project.minecraft_version.toString(),
         loader_version: project.loader_version.toString(),
         fabric_api_version: project.fabric_api_version.toString()]
@@ -89,13 +105,31 @@ sourceSets {
         compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
         runtimeClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.runtimeClasspath
     }
+    bettercombatcheck {
+        compileClasspath += sourceSets.gametest.output + sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.gametest.output + sourceSets.gametest.runtimeClasspath
+    }
+}
+dependencies {
+    compileOnly('maven.modrinth:better-combat:8Vyq1h9a') { transitive = false }
+    bettercombatcheckCompileOnly('maven.modrinth:better-combat:8Vyq1h9a') { transitive = false }
 }
 loom {
     mods {
         "clockwork_bosses_regression" { sourceSet sourceSets.gametest }
         "clockwork_bosses_clientcheck" { sourceSet sourceSets.clientcheck }
+        "clockwork_bosses_bettercombat_checks" { sourceSet sourceSets.bettercombatcheck }
     }
     runs {
+        bettercombatcheck {
+            server()
+            source sourceSets.bettercombatcheck
+            name "Clockwork Boss Better Combat compatibility checks"
+            vmArg "-Dfabric-api.gametest"
+            vmArg "-Dfabric-api.gametest.report-file=${project.layout.buildDirectory.get().asFile}/compat-bettercombat/gametest.xml"
+            runDir "build/compat-bettercombat"
+            ideConfigGenerated false
+        }
         gametest {
             server()
             source sourceSets.gametest
@@ -152,7 +186,7 @@ check.dependsOn templateTaskChecks
  'workshopPresetChecks':'PresetChecks', 'workshopDraftMediaChecks':'DraftMediaChecks',
  'workshopItemCatalogChecks':'ItemCatalogChecks', 'workshopSoundUploadChecks':'SoundUploadChecks',
  'workshopMergeChecks':'WorkshopMergeChecks', 'workshopAdapterChecks':'WorkshopAdapterChecks',
- 'workshopCoreSchemaChecks':'WorkshopCoreSchemaChecks'].each { taskName, checkClass ->
+ 'workshopCoreSchemaChecks':'WorkshopCoreSchemaChecks', 'workshopChannelChecks':'ChannelChecks'].each { taskName, checkClass ->
     tasks.register(taskName, JavaExec) {
         dependsOn testClasses
         classpath = sourceSets.test.runtimeClasspath

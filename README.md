@@ -13,6 +13,31 @@ The next bug-fix release is `0.2.1`; the next feature release is `0.3.0`.
 Prereleases use a hyphen, for example `0.3.0-beta.1`. The addon API remains
 experimental revision 1; this release does not promise a stable addon API.
 
+**Prepared next beta: `0.3.0-beta.5`.** Publish refreshes in-game autocomplete
+for future spawns. Running fights retain their current settings: **run
+`/boss reload` to apply published changes to bosses that are already spawned.**
+Compilation/package checks are complete; this build is not deployed or
+regression-tested, and website compatibility has not been declared yet.
+
+**Currently supported beta preview: `0.3.0-beta.4`.** Explicit Workshop build channels,
+an isolated testing override and declared website compatibility are documented
+in [Workshop](WORKSHOP.md). Existing relay URLs/0.2.0 protocol are preserved;
+no host fallback or server-setting change is made. The packaged
+channel is beta (`https://beta.clockworkboss.com`), chosen explicitly rather than
+inferred from the version. Existing production URLs stay pinned; deliberately
+set `testing_channel=beta` on an isolated test server to select beta instead.
+
+Beta website `0.3.0-rc.1` now explicitly supports this preview and legacy
+`0.2.0`. Production remains unchanged; see Workshop for deliberate beta selection.
+
+**Better Combat preview: `0.3.0-beta.2`.** Basic Better Combat compatibility uses
+one optional hand-availability query. Personal offhand equipment stays in place;
+the fight potion uses an empty, usable offhand or a free inventory slot. Native
+server damage and the existing encounter PvP policy remain authoritative.
+See [Better Combat testing](BETTER_COMBAT_TESTING.md) for pinned versions,
+automated results, remaining multiplayer checks and reproducible commands.
+This preview is not deployed or published; `0.2.0` remains the release.
+
 **Playtesting:** [The in-game checklist](PLAYTEST_CHECKLIST.md) has a full session
 of repeatable steps and expected results for editing, activation, combat, player
 support, visuals/audio, permissions, addons and cleanup. Record Pass, Fail and
@@ -72,7 +97,56 @@ Defaults preserve the current one-pixel look. These changes are included in
 [the Cloudflare workshop](https://workshop.clockworkboss.com). A connected editor
 needs the new core's schema. The website stays outside the mod jar.
 
+**Development source: eyebrow expressions and rotation.** Both editors offer
+Angry, Neutral, Curious and Sad in the glowing-eyebrow section. Left/right angles
+use whole degrees from -45 to 45; positive is clockwise around the brow center.
+Preset selection keeps existing positions, and Reset restores selected positions
+and zero rotation while keeping the chosen expression. Old templates retain the
+original angry brows. Optional **Encounter expressions** assigns a shape and two
+angle overrides to melee, sonic boom, roar, getting hit and a new target. Enable
+`skin.glowing_eyebrows.events.enabled` to use the rules; omission/false keeps the
+static face. `inherit` means the base shape, and null angles mean base rotations.
+Random choices use the enabled shapes in `random_pool`; an empty pool uses base.
+
+A player hit briefly overrides the current attack/roar, then returns to it if it
+is still running. Otherwise the face returns to the new-target pose or resting
+face. Hit and target rules have separate duration/cooldown fields (20 game ticks
+= one second). Random resting expressions change only after completed melee
+swings or sonic beams. No separate random timer is added. Expiry uses the existing
+ten-tick watcher, so a reaction can last up to nine extra game ticks. Phase
+changes, reload, death/removal and unload discard transient expressions. The
+existing native damage/AI path stays responsible for attacks.
+
+Both editors have local still-pose selection for base, each event and resting
+random samples; these selectors are not saved. The effect is visible to updated
+Clockwork clients; unmodded clients retain vanilla rendering and older clients
+retain their old brow shape. Source compiled successfully; no jar was packaged,
+deployed or playtested, and the hosted website has not been updated for this feature.
+
 ## Install
+
+### Development preview: encounter PvP protection (0.3.0-beta.1)
+
+Set `boss_bar.pvp_protection.enabled` in each template. The native editor exposes
+it under **Arena effects → PvP protection**. The separate website candidate has
+**Arena & players → PvP protection**; that website update is not published yet.
+New templates and bundled presets explicitly enable it. Existing templates with
+missing/null settings stay disabled; editing or re-saving them does not opt in.
+
+Protection starts at activation, including emergence, and uses the boss-bar
+arena's box or moving radius. If either player is inside any protected active
+arena, both directions of player-caused harm are blocked immediately. Melee,
+sweeps, owned projectiles, Channeling lightning, splash/lingering harmful potions, and attributed blast
+damage/knockback are covered. Helpful buffs/healing, boss and environmental harm,
+self-inflicted damage, and authorized `/effect` commands remain native.
+Pre-existing effects are not purged. Unattributed hazards such as fire/lava from
+placed blocks remain environmental; addon damage/effects need a native owner/source.
+
+No new tick watcher, team assignment or player membership cache is added.
+Fresh arena checks happen at harm time. Source entities retain only a validated
+owner UUID; effect-call context is released in `finally`, even on failure.
+See [Preflight](PREFLIGHT.md) for isolated checks and [Playtest checklist](PLAYTEST_CHECKLIST.md)
+for real multiplayer validation. This preview is separate from the 0.2.0 checkpoint.
 
 Install `clockwork_bosses-0.2.0-beta.4.jar` on the server alongside Fabric API.
 Remove old core and companion jars first; restart after changing a jar. Matching
@@ -476,7 +550,9 @@ cache.
 `skin.glowing_eyes.scale_x` / `scale_y` default to 1.0.
 Eye defaults are (3,7) and (11,7). `skin.glowing_eyebrows` has
 `left_x`, `left_y`, `right_x` and `right_y`, integer 0-12 for the 4x4 masks;
-defaults are (2,2) and (10,2).
+defaults are (2,2) and (10,2). The development source adds `expression` (angry,
+neutral, curious, sad) and independent `left_rotation` / `right_rotation`
+(-45 to 45 whole degrees, default 0). Pixels rotated past the face edge are clipped.
 
 Narrower/Wider adjusts spacing, and Both/Left/Right selects which shape moves
 or resets. Preview glow is steady and saturated for alignment; live glow keeps
@@ -700,17 +776,20 @@ Older files missing a support section keep that feature disabled.
 - Later floor changes, exit and reentry preserve health percentage. For example,
   leaving with 50/100 HP yields 10/20 HP if the player's normal maximum is 20.
   Only this mod's named modifier is removed; armor/base/other modifiers remain.
-- The reusable offhand potion defaults to **20 HP, 15 seconds cooldown,
+- The reusable fight potion defaults to **20 HP, 15 seconds cooldown,
   20 hunger and 20 saturation restored**. Healing is capped at max HP, hunger at
   20, and saturation at the resulting hunger. Normal potion drinking time applies.
   The cooldown begins on successful completion, uses game time, is shared by
   copies/overlapping encounters, and survives reentry, reconnect and respawn.
 
-An occupied offhand moves into a free inventory slot; a full inventory prevents the gift
-and displays instructions. On exit the original item is restored only if the recorded
-contents still match and the offhand is empty; stack-capacity changes alone are allowed. Moving it during the fight leaves it in the
-inventory. Cleanup preserves changed items and does not overwrite an occupied offhand. Owned bottles are removed on exit,
-death, disconnect and encounter cleanup; dropped bottles are discarded.
+In `0.3.0-beta.2`, an empty, usable offhand receives the bottle. An occupied
+offhand stays untouched; an unusable offhand, including Better Combat's
+two-handed weapon mask, also uses a free inventory slot. Move that bottle to
+the main hand to drink normally. If no usable slot is free, no gift is made:
+free a slot and reenter the arena. Equipment is never moved, overwritten or
+dropped to make room. Cleanup reads actual inventory storage, including hidden
+offhand slots and cursor copies. Owned bottles are removed on exit, death,
+disconnect and encounter cleanup; dropped bottles are discarded.
 
 Later development source strengthens `/boss remove`: it also clears orphaned
 inventory/cursor copies, including when the removed boss lacks runtime state,
@@ -720,7 +799,8 @@ remains active. This adds no timer; see [current verification](PREFLIGHT.md).
 This source also releases temporary bottles before native player death loot,
 so Universal Graves saves the personal offhand item instead of the fight potion.
 An older saved bottle is removed if used without a current potion grant.
-This later fix has not been packaged or deployed.
+Death cleanup is included in this preview; grave-mod behavior still needs the
+server's own multiplayer playtest.
 
 Stored container copies are not globally scanned and remain owner-locked and unusable
 outside an active arena. Server validation checks the exact current arena both when
@@ -755,9 +835,9 @@ These fragments go inside `boss_bar`:
 | `hunger_restored` | Whole number 0-20 |
 | `saturation_restored` | 0-20 |
 
-Cooldown converts to game ticks by rounding up. Offhand restoration checks
-the recorded slot's item/count/components and an empty offhand. Stack-capacity
-normalization alone is allowed; changed/moved items stay in place.
+Cooldown converts to game ticks by rounding up. All copies and both hands share
+the same server deadline. This preview keeps no displaced-equipment snapshot;
+personal items stay where the player put them.
 
 ## Phases and effects
 
@@ -936,6 +1016,11 @@ independent rolls, Keep/Replace, native death eligibility and save/reload rules.
 ## Darkness field guide
 
 Use `dormant_darkness` for the hidden boss waiting underground, and `phases.<phase>.darkness` after emergence. Both sections use the fields below and replace vanilla Warden Darkness only for marked Clockwork Bosses. New templates and bundled presets include the separate dormant section; existing templates can add it manually without recreating a boss. Run `/boss reload` after editing.
+
+In the Workshop, **Save draft** and **Publish draft** must both succeed before
+`/boss reload` can apply edited values. An **Active template changed** error
+requires loading/reviewing the latest active template and reapplying the desired
+edits; reload cannot apply a rejected save. See [Workshop recovery](WORKSHOP.md#drafts-and-media).
 
 | Field | Meaning |
 | --- | --- |

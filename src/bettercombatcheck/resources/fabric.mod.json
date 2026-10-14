@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "clockwork_bosses_bettercombat_checks",
+  "version": "1",
+  "name": "Isolated Better Combat checks",
+  "environment": "server",
+  "entrypoints": { "fabric-gametest": ["clockwork.bosses.ClockworkBossBetterCombatGameTests"] },
+  "depends": { "clockwork_bosses_regression": "*", "bettercombat": "3.2.2", "fabric-gametest-api-v1": "*" }
+}

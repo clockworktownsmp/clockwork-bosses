@@ -57,6 +57,9 @@ public final class ClockworkBossEditorSchema {
         for (String section : List.of("player_health", "reusable_potion"))
             if (get(stored, "boss_bar." + section + ".enabled") == null)
                 putCreating(copy, "boss_bar." + section + ".enabled", new JsonPrimitive(false));
+        var storedPvp = get(stored, "boss_bar.pvp_protection.enabled");
+        if (storedPvp == null || storedPvp.isJsonNull())
+            putCreating(copy, "boss_bar.pvp_protection.enabled", new JsonPrimitive(false));
         // Geometry is optional on disk. Virtual inputs let admins enter it without changing
         // an unset region merely by opening or saving an unrelated editor page.
         for (String root : List.of("activation", "boss_bar.visibility_area")) {
@@ -265,10 +268,12 @@ public final class ClockworkBossEditorSchema {
         JsonElement sample = get(DEFAULTS, base);
         if (sample == null || sample.isJsonNull()) sample = current;
         boolean nullable = path.startsWith("phases.") || path.startsWith("dormant_darkness.") || current.isJsonNull();
+        if (base.startsWith("skin.glowing_eyebrows.events.")) nullable = true; // Null uses the documented runtime fallback.
         if (path.matches("phases\\.[^.]+\\.subphases\\.[^.]+\\.(attacks_before_next|duration_ticks|type)")) nullable = false;
         List<String> choices = switch (base) {
             case "loot.vanilla_drops" -> List.of("keep", "replace");
             case "skin.type" -> List.of("player", "default", "custom");
+            case "skin.glowing_eyebrows.expression" -> List.of("angry", "neutral", "curious", "sad");
             case "activation.type" -> List.of("player_enter_area", "player_enter_radius", "redstone");
             case "activation.shape" -> List.of("box");
             case "boss_bar.visibility_area.shape" -> List.of("box", "radius");
@@ -281,18 +286,24 @@ public final class ClockworkBossEditorSchema {
         if (key.equals("subphase_order")) choices = List.of("sequential", "random");
         if (path.matches("phases\\.[^.]+\\.subphases\\.[^.]+\\.type")) choices = List.of("attack", "recovery");
         if (base.equals("loot.source")) choices = List.of("entries", "table");
+        if (base.startsWith("skin.glowing_eyebrows.events.") && key.equals("expression"))
+            choices = List.of("inherit", "angry", "neutral", "curious", "sad", "random");
         if (reward && key.equals("type")) choices = List.of("item");
         Kind kind = sample != null && sample.isJsonPrimitive() ? sample.getAsJsonPrimitive().isBoolean() ? Kind.BOOLEAN
                 : sample.getAsJsonPrimitive().isNumber() ? Kind.NUMBER : Kind.TEXT : Kind.JSON;
         // Optional geometry and thresholds are absent from some default documents.
         if (List.of("x", "y", "z", "minimum_health_percent", "attacks_before_next").contains(key)) kind = Kind.NUMBER;
+        if (base.startsWith("skin.glowing_eyebrows.") && key.endsWith("_rotation")) {
+            kind = Kind.NUMBER;
+            if (base.startsWith("skin.glowing_eyebrows.events.")) nullable = true;
+        }
         if (key.equals("enabled") || key.equals("flash") || key.equals("requires_line_of_sight") || key.equals("roar_between_subphases")) kind = Kind.BOOLEAN;
         if (!choices.isEmpty() || List.of("file", "name", "dimension", "text", "color").contains(key)) kind = Kind.TEXT;
         if (kind == Kind.BOOLEAN) choices = List.of("true", "false");
         boolean integer = key.endsWith("_ticks") || key.endsWith("_amplifier")
                 || List.of("count", "level", "x", "y", "z", "min_attacks", "max_attacks", "attacks_before_next").contains(key);
         if (base.startsWith("skin.glowing_eyes.")) integer = !key.startsWith("scale_");
-        if (base.startsWith("skin.glowing_eyebrows.")) integer = true;
+        if (base.startsWith("skin.glowing_eyebrows.")) integer = kind == Kind.NUMBER;
         double min = -30_000_000, max = 30_000_000;
         switch (key) {
             case "left_x", "left_y", "right_x", "right_y" -> { min = 0; max = 15; }
@@ -332,7 +343,11 @@ public final class ClockworkBossEditorSchema {
         }
         String help = ClockworkBossTemplateDocument.description(path);
         if (key.equals("hunger_restored")) integer = true;
-        if (base.startsWith("skin.glowing_eyebrows.")) { min = 0; max = 12; }
+        if (base.startsWith("skin.glowing_eyebrows.") && kind == Kind.NUMBER) {
+            if (key.endsWith("_rotation")) { min = ClockworkBossBrows.MIN_ROTATION; max = ClockworkBossBrows.MAX_ROTATION; }
+            else if (key.endsWith("_ticks")) { min = key.endsWith("cooldown_ticks") ? 0 : 1; max = 12000; }
+            else { min = 0; max = 12; }
+        }
         if (base.startsWith("skin.glowing_pupils.") && kind == Kind.NUMBER) {
             integer = !key.startsWith("scale_");
             min = integer ? -1 : 0.5; max = integer ? 7 : 8;
@@ -440,6 +455,7 @@ public final class ClockworkBossEditorSchema {
     /** Common labels for the in-game editor and exported schema. Special page
      * titles can still describe a field in context without duplicating its limits. */
     public static String label(String path) {
+        if (path.equals("boss_bar.pvp_protection")) return "PvP protection";
         String[] words = path.substring(path.lastIndexOf('.') + 1).replace('_', ' ').replace('-', ' ').split(" ");
         StringBuilder result = new StringBuilder();
         for (String word : words) if (!word.isEmpty()) {

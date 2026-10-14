@@ -16,6 +16,9 @@ import org.slf4j.LoggerFactory;
  * short permission queries on Minecraft's main thread.
  */
 public final class TemplateApi {
+    /** The merged server refreshes command suggestions after publication. This
+     * runs on the existing file worker and never changes a running encounter. */
+    @FunctionalInterface interface PublishedTemplateIndex { void refresh(String name) throws Exception; }
     private static final class Denied extends IOException { Denied() { super("Session expired or owner access revoked before save/publish commit"); } }
     private static final Logger LOG = LoggerFactory.getLogger("clockwork_bosses_web");
     private final AccessSessions access;
@@ -25,8 +28,19 @@ public final class TemplateApi {
     private final ItemCatalog items;
     private final String origin, authority, cookieName, workshopUrl;
     private final boolean secure;
+    private final WorkshopCompatibility compatibility;
+    private final PublishedTemplateIndex publishedTemplateIndex;
     TemplateApi(String origin, AccessSessions access, TemplateFiles files, String serverId) throws IOException { this(origin, access, files, serverId, null); }
     TemplateApi(String origin, AccessSessions access, TemplateFiles files, String serverId, ItemCatalog items) throws IOException {
+        this(origin, access, files, serverId, items, null);
+    }
+    TemplateApi(String origin, AccessSessions access, TemplateFiles files, String serverId, ItemCatalog items, WorkshopCompatibility compatibility) throws IOException {
+        this(origin, access, files, serverId, items, compatibility, null);
+    }
+    TemplateApi(String origin, AccessSessions access, TemplateFiles files, String serverId, ItemCatalog items,
+                WorkshopCompatibility compatibility, PublishedTemplateIndex publishedTemplateIndex) throws IOException {
+        this.compatibility = compatibility;
+        this.publishedTemplateIndex = publishedTemplateIndex;
         this.items = items;
         URI uri;
         try { uri = URI.create(origin); } catch (IllegalArgumentException invalid) { throw new IOException("Invalid workshop origin"); }
@@ -45,7 +59,20 @@ public final class TemplateApi {
     public boolean itemCatalogAvailable() { return items != null; }
     public String workshopUrl() { return workshopUrl; }
     public AccessSessions access() { return access; }
-    public void close() { access.clear(); skins.clear(); }
+    public void close() { access.clear(); skins.clear(); if (compatibility != null) compatibility.close(); }
+    void connectCompatibility(java.net.http.HttpClient http) {
+        if (compatibility != null) { compatibility.attach(http); compatibility.refresh(true); }
+    }
+    /** Same existing capability fields, shared with release compatibility checks. */
+    static JsonObject capabilities(boolean itemCatalog) {
+        var result = object("enabled", true);
+        result.addProperty("preset_media", true); result.addProperty("draft_media", true); result.addProperty("media_sources", true);
+        result.addProperty("item_catalog", itemCatalog); result.add("sound_uploads", AudioUploadService.capabilities()); return result;
+    }
+    private void commitAllowed(String token, AccessSessions.Session session) throws IOException {
+        if (access.recheck(token, session) == null) throw new Denied();
+        if (compatibility != null) compatibility.requireCurrent();
+    }
 
     public void handle(HttpExchange exchange) throws IOException {
         String method = exchange.getRequestMethod(), path = exchange.getRequestURI().getRawPath();
@@ -57,7 +84,12 @@ public final class TemplateApi {
             if (suppliedOrigin != null && !suppliedOrigin.equals(origin)) { json(exchange, 403, error("Unexpected origin")); return; }
             boolean changing = method.equals("POST") || method.equals("PUT");
             if (changing && !origin.equals(suppliedOrigin)) { json(exchange, 403, error("Same-origin request required")); return; }
-            if (path.equals("/api/status") && method.equals("GET")) { var result = object("enabled", true); result.addProperty("preset_media", true); result.addProperty("draft_media", true); result.addProperty("media_sources", true); result.addProperty("item_catalog", items != null); result.add("sound_uploads", AudioUploadService.capabilities()); json(exchange, 200, result); return; }
+            if (path.equals("/api/status") && method.equals("GET")) {
+                var result = capabilities(items != null);
+                result.addProperty("template_index_refresh", publishedTemplateIndex != null);
+                if (compatibility != null) { compatibility.refresh(false); compatibility.describe(result); }
+                json(exchange, 200, result); return;
+            }
             if (path.equals("/api/login") && method.equals("POST")) {
                 if (!access.permit("login", 20)) { json(exchange, 429, error("Too many login attempts; retry in a minute")); return; }
                 JsonObject body = TemplateJson.parse(body(exchange, 1024));
@@ -73,6 +105,9 @@ public final class TemplateApi {
             if (changing && !equal(session.csrf(), exchange.getRequestHeaders().getFirst("X-Workshop-CSRF"))) { json(exchange, 403, error("Session CSRF check failed")); return; }
             if (path.equals("/api/session") && method.equals("GET")) { json(exchange, 200, identity(session)); return; }
             if (path.equals("/api/logout") && method.equals("POST")) { access.logout(token); cookie(exchange, "", 0); json(exchange, 200, object("logged_out", true)); return; }
+            // Login/logout/read-only recovery stay available. Draft saves,
+            // copies/renames, publishing and raw sound uploads share this gate.
+            if (changing && compatibility != null) compatibility.requireWritable();
             if (path.equals("/api/templates") && method.equals("GET")) {
                 JsonArray list = new JsonArray();
                 for (var entry : files.listing()) {
@@ -99,7 +134,7 @@ public final class TemplateApi {
                 String expected = revision(exchange), fileRevision = singleHeader(exchange,"X-Sound-Revision"); TemplateFiles.revision(fileRevision);
                 if (!fileRevision.equals("none") && !"1".equals(singleHeader(exchange,"X-Sound-Overwrite"))) throw new IOException("Confirm the existing sound overwrite before uploading");
                 if (!access.permit("sound-upload",12)) { exchange.getResponseHeaders().set("Retry-After","60"); json(exchange,429,error("Sound upload limit reached (12 per minute); retry in a minute")); return; }
-                var snapshot = uploads.upload(exchange,files,parts[3],parts[4],parts[5],expected,fileRevision,() -> { if (access.recheck(token,session)==null) throw new Denied(); });
+                var snapshot = uploads.upload(exchange,files,parts[3],parts[4],parts[5],expected,fileRevision,() -> commitAllowed(token, session));
                 audit(session,"upload-draft-sound",parts[3],snapshot.revision());
                 JsonObject result = new JsonObject(); result.addProperty("revision",snapshot.revision()); result.addProperty("base_revision",snapshot.baseRevision()); result.addProperty("filename",parts[5]); result.addProperty("kind",parts[4]); json(exchange,200,result); return;
             }
@@ -152,7 +187,7 @@ public final class TemplateApi {
                     if (access.recheck(token, session) == null) { json(exchange, 401, error("Session expired or owner access revoked during upload")); return; }
                     var presetHeaders = exchange.getRequestHeaders().get("X-Workshop-Preset");
                     if (presetHeaders != null && presetHeaders.size() != 1) throw new IOException("One preset header is required");
-                    var snapshot = files.save(name, content, expected, base, exchange.getRequestHeaders().getFirst("X-Workshop-Preset"), singleHeader(exchange,"X-Workshop-Draft-Source"), () -> { if (access.recheck(token, session) == null) throw new Denied(); });
+                    var snapshot = files.save(name, content, expected, base, exchange.getRequestHeaders().getFirst("X-Workshop-Preset"), singleHeader(exchange,"X-Workshop-Draft-Source"), () -> commitAllowed(token, session));
                     audit(session, "save-draft", name, snapshot.revision());
                     JsonObject result = new JsonObject(); result.addProperty("revision", snapshot.revision()); result.addProperty("base_revision", snapshot.baseRevision()); result.addProperty("preset", snapshot.preset()); json(exchange, 200, result); return;
                 }
@@ -160,11 +195,27 @@ public final class TemplateApi {
             if (parts.length == 4 && parts[1].equals("api") && parts[2].equals("publish") && method.equals("POST")) {
                 String name = parts[3]; TemplateFiles.name(name); body(exchange, 1024);
                 if (access.recheck(token, session) == null) { json(exchange, 401, error("Session expired or owner access revoked before publish")); return; }
-                String revision = files.publish(name, revision(exchange), () -> { if (access.recheck(token, session) == null) throw new Denied(); }); audit(session, "publish", name, revision);
-                JsonObject result = new JsonObject(); result.addProperty("revision", revision); result.addProperty("reload_required", true); json(exchange, 200, result); return;
+                String revision = files.publish(name, revision(exchange), () -> commitAllowed(token, session)); audit(session, "publish", name, revision);
+                // Publication has committed before the index notification. A
+                // failed notification must not turn a durable publish into a
+                // reported save failure or trigger an automatic replay.
+                boolean indexRefreshed = false;
+                if (publishedTemplateIndex != null) {
+                    try { publishedTemplateIndex.refresh(name); indexRefreshed = true; }
+                    catch (Exception unavailable) {
+                        LOG.warn("Published template '{}' but command suggestions could not refresh ({}); run /boss reload.",
+                                name, unavailable.getClass().getSimpleName());
+                    }
+                }
+                JsonObject result = new JsonObject(); result.addProperty("revision", revision);
+                result.addProperty("template_index_refreshed", indexRefreshed);
+                // Preserve the legacy field: existing bosses still require an
+                // explicit gameplay reload even when autocomplete is current.
+                result.addProperty("reload_required", true); json(exchange, 200, result); return;
             }
             json(exchange, 405, error("Unsupported template operation"));
         } catch (AccessSessions.RateLimited limited) { exchange.getResponseHeaders().set("Retry-After", "60"); json(exchange, 429, error("Request limit reached; retry in a minute")); }
+        catch (WorkshopCompatibility.Blocked blocked) { json(exchange, blocked.status, error(blocked.getMessage())); }
         catch (Denied denied) { cookie(exchange, "", 0); json(exchange, 401, error(denied.getMessage())); }
         catch (AudioUploadService.Busy busy) { exchange.getResponseHeaders().set("Retry-After","5"); json(exchange,429,error(busy.getMessage())); }
         catch (TemplateFiles.Conflict conflict) { json(exchange, 409, error(conflict.getMessage())); }

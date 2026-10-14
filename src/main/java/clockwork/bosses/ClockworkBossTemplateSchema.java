@@ -121,7 +121,8 @@ public final class ClockworkBossTemplateSchema {
         JsonObject result = new JsonObject(); result.addProperty("type", "object");
         if ((path.startsWith("phases.") && !path.equals(PHASE_PATH) && !path.equals(CHILD_PATH)
                 && !path.equals(PHASE_PATH + ".roars.<roar>")
-                && !path.endsWith(".action_settings")) || path.equals("dormant_darkness") || path.equals("loot"))
+                && !path.endsWith(".action_settings")) || path.equals("dormant_darkness") || path.equals("loot") || path.equals("boss_bar.pvp_protection")
+                || path.equals("skin.glowing_eyebrows.events") || path.startsWith("skin.glowing_eyebrows.events."))
             result.add("type", strings("object", "null"));
         result.addProperty("additionalProperties", true); // Addon data is never rejected/pruned merely for being unknown.
         JsonObject properties = new JsonObject();
@@ -160,7 +161,8 @@ public final class ClockworkBossTemplateSchema {
      * the in-game editor. Null overrides remain null in the exported defaults. */
     private static JsonObject scalar(String path, JsonElement sample) {
         var field = ClockworkBossEditorSchema.field(path, sample);
-        JsonObject result = constraints(field.kind().name(), field.integer(), field.min(), field.max(), field.nullable());
+        JsonObject result = constraints(field.kind().name(), field.integer(), field.min(), field.max(),
+                field.nullable() || path.equals("boss_bar.pvp_protection.enabled"));
         if (field.kind() == ClockworkBossEditorSchema.Kind.TEXT) {
             var rule = ClockworkBossTemplateText.rule(path);
             result.addProperty("maxLength", rule.maxLength());
@@ -208,8 +210,14 @@ public final class ClockworkBossTemplateSchema {
                 || path.equals("attacks.roar.sound.range")
                 || path.matches("phases\\.[^.]+\\.(sounds\\.phase_change|roar\\.sound|roars\\.[^.]+\\.sound)\\.range"));
         if (spatialRange) metadata.add("automatic", automaticSoundDistance());
-        if (path.equals("skin.glowing_pupils") || path.startsWith("skin.glowing_pupils.")) {
-            // The explicit Auto sentinel lets the browser reproduce the same eye-dependent fallback.
+        if (path.startsWith("skin.glowing_eyebrows.events.") && path.endsWith("_rotation")) {
+            omitted.addProperty("kind", "inherit");
+            omitted.addProperty("from", "skin.glowing_eyebrows." + path.substring(path.lastIndexOf('.') + 1));
+            metadata.addProperty("null_behavior", "Keep the base eyebrow rotation.");
+        } else if (path.equals("skin.glowing_pupils") || path.startsWith("skin.glowing_pupils.")
+                || path.equals("skin.glowing_eyebrows") || path.startsWith("skin.glowing_eyebrows.")) {
+            // Optional face settings use the same legacy fallback as their
+            // creation values. Pupils additionally retain their Auto sentinel.
             omitted.addProperty("kind", "value"); omitted.add("value", definition.get("default").deepCopy());
         } else if (spatialRange && parent.isEmpty()) {
             // New templates choose Auto; omitted legacy base/voice fields still mean 32.
@@ -218,6 +226,12 @@ public final class ClockworkBossTemplateSchema {
             omitted.addProperty("kind", "disabled"); omitted.addProperty("description", "Disable template rewards and keep vanilla drops; null has the same meaning.");
         } else if (path.equals("loot.source")) {
             omitted.addProperty("kind", "value"); omitted.addProperty("value", ClockworkBossLoot.DEFAULT_SOURCE);
+        } else if (path.equals("boss_bar.pvp_protection")) {
+            omitted.addProperty("kind", "disabled"); omitted.addProperty("description", "Absent/null section preserves ordinary PvP; creation defaults enable protection.");
+        } else if (path.equals("boss_bar.pvp_protection.enabled")) {
+            omitted.addProperty("kind", "value"); omitted.addProperty("value", false);
+            metadata.addProperty("null_behavior", "Disable PvP protection; does not inherit a phase.");
+            metadata.addProperty("null_label", "Disabled / null");
         } else if (path.equals("boss_bar.player_health") || path.equals("boss_bar.reusable_potion")) {
             omitted.addProperty("kind", "disabled"); omitted.addProperty("description", "Absent sections grant no player support, even though new templates enable it.");
         } else if (path.equals("boss_bar.player_health.enabled") || path.equals("boss_bar.reusable_potion.enabled")) {
@@ -257,6 +271,8 @@ public final class ClockworkBossTemplateSchema {
     /** Inheritance is a relationship, not a copied value. Registered action
      * settings have their own defaults and do not inherit a parent's action object. */
     private static String inheritsFrom(String path) {
+        if (path.startsWith("skin.glowing_eyebrows.events.") && path.endsWith("_rotation"))
+            return "skin.glowing_eyebrows." + path.substring(path.lastIndexOf('.') + 1);
         if (path.startsWith(CHILD_PATH + ".")) {
             String field = path.substring(CHILD_PATH.length() + 1);
             return List.of("type", "duration_ticks", "attacks_before_next").contains(field) ? "" : PHASE_PATH + "." + field;
