@@ -1215,3 +1215,43 @@ User agreed to automatic arena sizing. follow_range=0 resolves to moving-radius 
 Java 25 / Gradle 9.7.0 / Loom 1.18.2 offline compileJava compileClientJava succeeded after the final changes. This also compiled the pending saturated-preview refinement. No tests, game launches, packaging or deployment were performed. Installed jars remain Preview.23; next packaged version should be Preview.24. Runtime targeting/alerts/visual confirmation remains outstanding.
 
 </details>
+
+## 0.2.1 burrow visibility correction - 2026-10-15
+
+This patch is based on v0.2.0, commit
+`bcba72d0b279cd82991cc62b9f106abad84c1c92`. Its only production logic change
+releases obsolete DIGGING/EMERGING animation states for marked bosses inside the
+native pose-data callback, before vanilla starts the next pose's animation.
+Before-fix native/client regressions reproduced the old digging animation still
+translating the model underground after the server had restored visibility.
+Checkpoint recovery still owns original invisibility, silence, gravity and
+surface position; no polling, packet scheme or ordinary-Warden change was added.
+
+The isolated 0.2.1 source passed three focused native tests and 756 native-client
+model comparisons. Three real action cycles retained 134 ticks between emergence
+and the next attacking subphase; each client emergence starts fresh. Tests cover
+interruption/phase/reload/removal/failed-stop cleanup and preserving a previously
+invisible boss. The unload check invokes Fabric's callback, not physical chunk
+unload. Model checks use detached client entities and software rendering.
+Tyson then confirmed "it works!" in the isolated local 0.2.1 session with matching
+patched client code. This confirms that visibility symptom in that session;
+full modpack, unchanged-vanilla-client and packaged-jar playtests are not claimed.
+
+Packaged locally and offline with Java 25.0.4.1, Gradle 9.7.0 and Loom 1.18.2.
+This Minecraft 26.3 configuration uses the `jar` task; it has no `remapJar` task.
+The universal `clockwork_bosses-0.2.1.jar` is 1,353,979 bytes, SHA256
+`1112090426a0bfc73b38a9caa59dde8708794a04e2a0fff8f72482c81a582bae`.
+Inspection verified all 274 compiled classes and processed resources against the
+stable build outputs. Compared with preserved 0.2.0, only WardenMixin bytecode
+and version metadata change substantively; twelve text resources differ only in
+line endings. Class/resource inventories and bundled JOrbis bytes are unchanged.
+No regression, Observatory, Python, new API or private files enter the jar.
+The inspected package was not installed or deployed by this work.
+
+Local packaging receipts and the jar/checksum are under the ignored
+`outputs/release-0.2.1-20261015/` folder. Earlier focused-test evidence remains
+sealed separately. A matching updated Clockwork client is required for this
+client-local animation correction. Hosted Workshop exact-version allowlisting
+for core 0.2.1 remains pending; no website/relay compatibility bypass was made.
+The example addon pins its compiled core version exactly; existing 0.2.0 addon
+binaries were not rebuilt or certified for 0.2.1. No website or wiki was changed.

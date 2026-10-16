@@ -1,6 +1,6 @@
 # Clockwork Bosses
 
-**Current release: `0.2.0`.** One universal jar includes boss gameplay
+**Current release: `0.2.1`.** One universal jar includes boss gameplay
 and the optional hosted workshop, including the companion's sound-upload work.
 Remove the old companion jar when upgrading. The experimental action API,
 optional-client fallback, schema, permissions, GUI, pupils and spatial sounds
@@ -8,8 +8,8 @@ remain available. See [Workshop setup and migration](WORKSHOP.md) for commands,
 settings, preserved storage and authentication. Automated checks are recorded
 in [Preflight](PREFLIGHT.md); older release evidence below remains separate.
 
-The release version is `0.2.0` in both Fabric metadata and the jar filename.
-The next bug-fix release is `0.2.1`; the next feature release is `0.3.0`.
+The release version is `0.2.1` in both Fabric metadata and the jar filename.
+The next bug-fix release is `0.2.2`; the next feature release is `0.3.0`.
 Prereleases use a hyphen, for example `0.3.0-beta.1`. The addon API remains
 experimental revision 1; this release does not promise a stable addon API.
 
@@ -17,6 +17,15 @@ experimental revision 1; this release does not promise a stable addon API.
 of repeatable steps and expected results for editing, activation, combat, player
 support, visuals/audio, permissions, addons and cleanup. Record Pass, Fail and
 Not run separately when checking a new build or modpack.
+
+**Burrow visibility fix in 0.2.1:** bosses release the old digging animation
+when they emerge, finish the full native emerge animation, then attack visibly.
+Repeated burrows and interruptions also release obsolete pose animations;
+ordinary Wardens are unchanged. Native/model regressions passed, and the owner
+confirmed the fix in a local session with matching 0.2.1 client code. Install
+the updated jar on matching clients for this animation correction; unchanged
+vanilla clients are not certified fixed. Hosted Workshop editing compatibility
+for core 0.2.1 still needs an explicit website allowlist update/review.
 
 **Melee wind-up fix in 0.2.0:** moving the Warden or its opponent keeps the
 original attack timer. Native navigation continues. Reach and visibility are
@@ -74,12 +83,12 @@ needs the new core's schema. The website stays outside the mod jar.
 
 ## Install
 
-Install `clockwork_bosses-0.2.0-beta.4.jar` on the server alongside Fabric API.
+Install `clockwork_bosses-0.2.1.jar` on the server alongside Fabric API.
 Remove old core and companion jars first; restart after changing a jar. Matching
 modded clients use the same single jar. Clients without it can use the vanilla
 gameplay fallback below. Workshop access is optional and server-only.
 
-| Requirement | Version targeted by 0.1 |
+| Requirement | Version targeted by 0.2.1 |
 | --- | --- |
 | Minecraft | 26.3 |
 | Java | 25 or later |

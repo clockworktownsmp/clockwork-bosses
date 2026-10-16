@@ -24,6 +24,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.monster.warden.WardenAi;
 import net.minecraft.world.entity.monster.warden.Warden;
@@ -265,6 +266,20 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
     @Inject(method = "onSyncedDataUpdated", at = @At("TAIL"))
     private void clockworkBosses$syncHealthRange(EntityDataAccessor<?> key, CallbackInfo ci) {
         if (key.equals(clockworkBosses$IS_CLOCKWORK_BOSS)) clockworkBosses$setHealthRange(clockworkBosses$isClockworkBossSynced());
+    }
+
+    /** Vanilla never reuses a dug-away Warden. Bosses do: release the previous
+     * pose's model transform on both logical sides, including interrupted actions.
+     * This call site is inside the native pose-data branch, before it starts the
+     * new animation, so emergence keeps its full duration and fresh start time. */
+    @Inject(method = "onSyncedDataUpdated", at = @At(value = "INVOKE", target =
+            "Lnet/minecraft/world/entity/monster/warden/Warden;getPose()Lnet/minecraft/world/entity/Pose;"))
+    private void clockworkBosses$releaseBurrowAnimation(EntityDataAccessor<?> key, CallbackInfo ci) {
+        if (!clockworkBosses$isClockworkBossSynced()) return;
+        Warden warden = (Warden) (Object) this;
+        Pose pose = warden.getPose();
+        if (pose != Pose.DIGGING) warden.diggingAnimationState.stop();
+        if (pose != Pose.EMERGING) warden.emergeAnimationState.stop();
     }
 
     /** Opt in before native parent loading restores attributes and clamps saved Health; no second HP save field. */
