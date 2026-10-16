@@ -1,5 +1,18 @@
 # Clockwork Bosses
 
+**Tested checkpoint: `0.3.0-rc.3`.** After a burrow, the native emergence runs
+at three times normal speed and ends when both feet are planted: 34 ticks
+(about 1.7 seconds). Initial activation keeps its native 134-tick emergence.
+The burrow action has configurable emergence damage (default 20 HP), radius
+(default 10 blocks) and a native ground-burst toggle. Explicit saved radii keep
+their values; the particle ring has a fixed decorative size.
+
+Use the same candidate jar on client and server for the updated animation.
+The addon API remains experimental revision 1. Workshop routing is explicitly
+beta, independent of the version string; this checkpoint does not publish a
+website compatibility change. See [the rc.3 checkpoint report](CHECKPOINT_0.3.0-rc.3.md)
+for the exact jar hash, validation scope and remaining limits.
+
 **Current release: `0.2.0`.** One universal jar includes boss gameplay
 and the optional hosted workshop, including the companion's sound-upload work.
 Remove the old companion jar when upgrading. The experimental action API,
@@ -13,13 +26,13 @@ The next bug-fix release is `0.2.1`; the next feature release is `0.3.0`.
 Prereleases use a hyphen, for example `0.3.0-beta.1`. The addon API remains
 experimental revision 1; this release does not promise a stable addon API.
 
-**Prepared next beta: `0.3.0-beta.5`.** Publish refreshes in-game autocomplete
+**Earlier beta.5 checkpoint (historical).** Publish refreshes in-game autocomplete
 for future spawns. Running fights retain their current settings: **run
 `/boss reload` to apply published changes to bosses that are already spawned.**
 Compilation/package checks are complete; this build is not deployed or
 regression-tested, and website compatibility has not been declared yet.
 
-**Currently supported beta preview: `0.3.0-beta.4`.** Explicit Workshop build channels,
+**Earlier beta.4 compatibility checkpoint (historical).** Explicit Workshop build channels,
 an isolated testing override and declared website compatibility are documented
 in [Workshop](WORKSHOP.md). Existing relay URLs/0.2.0 protocol are preserved;
 no host fallback or server-setting change is made. The packaged
@@ -27,8 +40,9 @@ channel is beta (`https://beta.clockworkboss.com`), chosen explicitly rather tha
 inferred from the version. Existing production URLs stay pinned; deliberately
 set `testing_channel=beta` on an isolated test server to select beta instead.
 
-Beta website `0.3.0-rc.1` now explicitly supports this preview and legacy
-`0.2.0`. Production remains unchanged; see Workshop for deliberate beta selection.
+At that checkpoint, beta website `0.3.0-rc.1` explicitly supported that preview
+and legacy `0.2.0`. That website version is independent of the current core
+candidate version; see Workshop for deliberate beta selection.
 
 **Better Combat preview: `0.3.0-beta.2`.** Basic Better Combat compatibility uses
 one optional hand-availability query. Personal offhand equipment stays in place;
@@ -120,8 +134,11 @@ existing native damage/AI path stays responsible for attacks.
 Both editors have local still-pose selection for base, each event and resting
 random samples; these selectors are not saved. The effect is visible to updated
 Clockwork clients; unmodded clients retain vanilla rendering and older clients
-retain their old brow shape. Source compiled successfully; no jar was packaged,
-deployed or playtested, and the hosted website has not been updated for this feature.
+retain their old brow shape. These controls are packaged in the local
+`0.3.0-beta.6` checkpoint. Automated native server/client/editor checks passed;
+real multiplayer remains pending. No deployment has occurred, and the hosted
+website has not been updated for this feature. See
+[the checkpoint report](CHECKPOINT_0.3.0-beta.6.md) for results and Workshop limits.
 
 ## Install
 

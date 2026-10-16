@@ -47,6 +47,9 @@ public final class ApiChecks {
             var foreign=HttpRequest.newBuilder(URI.create(origin+"/api/drafts/test")).header("Cookie",cookie).header("Origin","https://evil.example").header("Content-Type","application/json").header("X-Workshop-CSRF",csrf).PUT(HttpRequest.BodyPublishers.ofString("{}")).build();
             require(client.send(foreign,HttpResponse.BodyHandlers.discarding()).statusCode()==403,"foreign Origin denied");
             String fixture="{\"format_version\":1,\"health\":1000,\"addon\":{\"huge\":9007199254740993123456789,\"precise\":0.12345678901234567890123456789,\"tiny\":1.2300e-120,\"null\":null,\"array\":[{},[],false],\"negative\":-0},\"phases\":{\"test_phase\":{\"minimum_health_percent\":50,\"subphases\":{\"custom\":{\"type\":\"example:unknown\",\"action_settings\":{\"unknown\":42}}}}}}";
+            // Prepared HTTP regressions retain long/huge/spelled opaque tokens
+            // through authenticated draft save, publication and exact download.
+            fixture=fixture.replace("\"addon\":{", "\"addon\":{\"extreme\":1e-2000000000,\"spelled\":1e00000000000000000000000000001,\"wide\":"+"9".repeat(160)+",");
             var saved=request("PUT","/api/drafts/test",fixture,write("none","none")); require(saved.statusCode()==200,"draft create "+new String(saved.body()));
             String rev=json(saved).get("revision").getAsString();
             require(!Files.exists(config.resolve("clockwork-bosses/boss-templates/test/template.json")),"draft did not activate");

@@ -444,10 +444,18 @@ public final class ClockworkBossEditorSchema {
                 String key = keys.get(index);
                 new ClockworkBossPhase(key);
                 JsonElement value = get(candidate, "phases." + key + ".minimum_health_percent");
-                if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) throw new IllegalArgumentException("Set a leaving health cutoff for " + key);
+                if (value == null || value.isJsonNull()) {
+                    // The form offers inheritance here. Resolve the same virtual
+                    // fallback as native gameplay; validation must not write it
+                    // into the owner's omitted/null stored field.
+                    double fallback = 100.0 * (keys.size() - index - 1) / keys.size();
+                    previous = Math.clamp(fallback, 0, previous);
+                    continue;
+                }
+                if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) throw new IllegalArgumentException("Set a leaving health cutoff for " + key);
                 double cutoff = value.getAsDouble();
                 if (!Double.isFinite(cutoff) || cutoff < 0 || cutoff > previous) throw new IllegalArgumentException("Phase cutoffs must descend from first to last (0–100)");
-                previous = cutoff;
+                previous = Math.max(0, cutoff); // Normalize negative zero only in the virtual clamp bound.
             }
         }
     }

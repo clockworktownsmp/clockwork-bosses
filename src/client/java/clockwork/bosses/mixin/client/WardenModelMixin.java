@@ -10,7 +10,7 @@ import net.minecraft.world.entity.AnimationState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 
-/** Sample 26.3's baked melee/Sonic Boom keyframes from captured server time.
+/** Sample 26.3's baked melee/Sonic Boom/post-burrow keyframes from captured server time.
  * Only marked bosses use these timelines; ordinary Warden animations stay native. */
 @Mixin(WardenModel.class)
 public abstract class WardenModelMixin {
@@ -29,6 +29,13 @@ public abstract class WardenModelMixin {
             long time = visuals.clockworkBosses$getSonicMillis();
             if (time >= 0) animation.apply(time, 1.0F);
             return; // Idle/cancelled marked charges must not replay a receipt-time native animation.
+        }
+        if (visuals.clockworkBosses$isClockworkBoss() && nativeState == renderState.emergeAnimationState) {
+            long time = visuals.clockworkBosses$getBurrowEmergenceMillis();
+            if (time >= 0) {
+                if (nativeState.isStarted()) animation.apply(time, 1.0F);
+                return;
+            }
         }
         original.call(animation, nativeState, age);
     }

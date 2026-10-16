@@ -24,6 +24,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.monster.warden.WardenAi;
 import net.minecraft.world.entity.monster.warden.Warden;
@@ -188,6 +189,10 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
     // Append so older visual slots retain their IDs. The optional-client filter also owns this slot.
     @Unique private static final EntityDataAccessor<Integer> clockworkBosses$PUPILS =
             SynchedEntityData.defineId(Warden.class, EntityDataSerializers.INT);
+    // Transient start game-time, not a save field. Append to preserve older IDs
+    // and include it in the optional-client filter for pairing and dirty updates.
+    @Unique private static final EntityDataAccessor<Long> clockworkBosses$BURROW_EMERGE_START =
+            SynchedEntityData.defineId(Warden.class, EntityDataSerializers.LONG);
     // Capture all allocated slots once, including ones whose default values
     // might be omitted from a packet. Keep this list aligned when adding fields.
     @Unique private static final ClockworkBossClientData clockworkBosses$CLIENT_DATA_LAYOUT =
@@ -195,9 +200,20 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
                     clockworkBosses$PHASE_CHANGE_TICK, clockworkBosses$SKIN_PLAYER_NAME, clockworkBosses$SKIN_TYPE,
                     clockworkBosses$CUSTOM_SKIN_FILE, clockworkBosses$TEMPLATE, clockworkBosses$MOB_SOUND_VOLUME,
                     clockworkBosses$SONIC_VISUAL, clockworkBosses$EYES, clockworkBosses$BROWS,
-                    clockworkBosses$MELEE_VISUAL, clockworkBosses$PUPILS);
+                    clockworkBosses$MELEE_VISUAL, clockworkBosses$PUPILS, clockworkBosses$BURROW_EMERGE_START);
     @Override public ClockworkBossClientData clockworkBosses$getClientDataLayout() {
         return clockworkBosses$CLIENT_DATA_LAYOUT;
+    }
+    @Override public void clockworkBosses$beginBurrowEmergence(long now) {
+        if (now < 0) throw new IllegalArgumentException("Negative burrow emergence start");
+        ((Warden) (Object) this).getEntityData().set(clockworkBosses$BURROW_EMERGE_START, now);
+    }
+    @Override public void clockworkBosses$clearBurrowEmergence() {
+        ((Warden) (Object) this).getEntityData().set(clockworkBosses$BURROW_EMERGE_START, -1L);
+    }
+    @Override public long clockworkBosses$burrowEmergenceMillis(long now, float partialTick) {
+        long start = ((Warden) (Object) this).getEntityData().get(clockworkBosses$BURROW_EMERGE_START);
+        return clockwork.bosses.ClockworkBossBurrowEmergence.millis(start, now, partialTick);
     }
     @Override public int clockworkBosses$getBrows() { return ((Warden) (Object) this).getEntityData().get(clockworkBosses$BROWS); }
     @Override public int clockworkBosses$getPupils() { return ((Warden) (Object) this).getEntityData().get(clockworkBosses$PUPILS); }
@@ -284,6 +300,21 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
     @Inject(method = "onSyncedDataUpdated", at = @At("TAIL"))
     private void clockworkBosses$syncHealthRange(EntityDataAccessor<?> key, CallbackInfo ci) {
         if (key.equals(clockworkBosses$IS_CLOCKWORK_BOSS)) clockworkBosses$setHealthRange(clockworkBosses$isClockworkBossSynced());
+    }
+
+    /** Vanilla never reuses a dug-away Warden. Bosses do: release the previous
+     * pose's model transform on both logical sides, including interrupted actions.
+     * This call site is inside the native pose-data branch, before it starts the
+     * new animation, preserving its fresh start and full clip. Post-burrow
+     * playback speed is sampled separately from the captured server start time. */
+    @Inject(method = "onSyncedDataUpdated", at = @At(value = "INVOKE", target =
+            "Lnet/minecraft/world/entity/monster/warden/Warden;getPose()Lnet/minecraft/world/entity/Pose;"))
+    private void clockworkBosses$releaseBurrowAnimation(EntityDataAccessor<?> key, CallbackInfo ci) {
+        if (!clockworkBosses$isClockworkBossSynced()) return;
+        Warden warden = (Warden) (Object) this;
+        Pose pose = warden.getPose();
+        if (pose != Pose.DIGGING) warden.diggingAnimationState.stop();
+        if (pose != Pose.EMERGING) warden.emergeAnimationState.stop();
     }
 
     /** Opt in before native parent loading restores attributes and clamps saved Health; no second HP save field. */
@@ -410,6 +441,7 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
         builder.define(clockworkBosses$BROWS, clockwork.bosses.ClockworkBossBrows.DEFAULT.packed());
         builder.define(clockworkBosses$PUPILS, clockwork.bosses.ClockworkBossPupils.DEFAULT.packed());
         builder.define(clockworkBosses$MELEE_VISUAL, "");
+        builder.define(clockworkBosses$BURROW_EMERGE_START, -1L);
     }
 
     /** Establish phase attributes before Brain.tick can attempt a native melee hit. */
@@ -524,7 +556,11 @@ public abstract class WardenMixin implements ClockworkBossMarker, ClockworkBossR
             }
         }
         if (capture) ClockworkBossDiagnostics.event(boss, target, "melee_native_attempt", "hp_before", before);
-        boolean accepted = original.call(boss, level, target);
+        boolean accepted;
+        try (var observation = clockwork.bosses.ClockworkBossVitals.action(boss,
+                target instanceof LivingEntity living ? living : null, clockwork.bosses.ClockworkBossActions.MELEE, null)) {
+            accepted = original.call(boss, level, target);
+        }
         if (accepted && clockworkBosses$isClockworkBoss && target instanceof LivingEntity living)
             ClockworkBossManager.onAttackLanded(boss, living, clockwork.bosses.ClockworkBossActions.MELEE, Math.max(0, before - living.getHealth()));
         if (capture) ClockworkBossDiagnostics.event(boss, target, "melee_native_result", "accepted", accepted,

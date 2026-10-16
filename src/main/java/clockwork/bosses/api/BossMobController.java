@@ -11,6 +11,13 @@ public interface BossMobController {
     Mob mob();
     Set<Identifier> capabilities();
     default boolean supports(Identifier capability) { return capabilities().contains(capability); }
+    /** Optional server-thread-only target boundary. Existing adapters remain
+     * unsupported until they implement their own native policy. */
+    default BossTargetRequest requestTarget(net.minecraft.server.level.ServerPlayer target) {
+        if (!(mob().level() instanceof net.minecraft.server.level.ServerLevel level) || !level.getServer().isSameThread())
+            throw new IllegalStateException("Target requests require the owning server thread");
+        return BossTargetRequest.UNSUPPORTED;
+    }
     /** Request one native roar from start(), requiring clockwork_bosses:roar and
      * an action that leaves native behavior execution enabled. The controller
      * waits for a valid target/recoil and owns interruption cleanup. */

@@ -15,6 +15,11 @@ import java.util.HashSet;
  */
 public final class TemplateJson {
     public static final int MAX_BYTES = 512 * 1024;
+    // Previously, every number was restricted to a four-digit exponent. Keep
+    // that arithmetic envelope for inspected known values, including the
+    // fractional digits in a 128-character token. Opaque addon numbers never
+    // enter arithmetic. Edit precision/scale limits remain owned by the editor.
+    private static final int MAX_INSPECTED_EXPONENT = 9_999;
     private final JsonObject schema;
     private final java.util.Map<String, java.util.regex.Pattern> patterns = new java.util.concurrent.ConcurrentHashMap<>();
     public TemplateJson() throws IOException {
@@ -31,20 +36,28 @@ public final class TemplateJson {
     public static JsonObject parse(byte[] bytes) throws IOException {
         return parse(bytes, MAX_BYTES);
     }
+    /** Template data can contain opaque addon numbers. Keep this explicit so
+     * relay/control callers retain their existing per-number inspection guard. */
+    public static JsonObject parseDocument(byte[] bytes) throws IOException {
+        return parse(bytes, MAX_BYTES, true);
+    }
     // Relay envelopes include base64; template inspection retains its 512 KiB limit.
     static JsonObject parse(byte[] bytes, int limit) throws IOException {
+        return parse(bytes, limit, false);
+    }
+    private static JsonObject parse(byte[] bytes, int limit, boolean opaqueNumbers) throws IOException {
         if (bytes.length == 0 || bytes.length > limit) throw new IOException("JSON exceeds size limit");
         String text;
         try { text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString(); }
         catch (CharacterCodingException error) { throw new IOException("Use UTF-8 JSON", error); }
         try (var reader = new JsonReader(new StringReader(text))) {
             reader.setStrictness(Strictness.STRICT);
-            JsonElement root = read(reader, 0, new int[]{0});
+            JsonElement root = read(reader, 0, new int[]{0}, opaqueNumbers);
             if (reader.peek() != JsonToken.END_DOCUMENT || !root.isJsonObject()) throw new IOException("Expected one JSON object");
             return root.getAsJsonObject();
         } catch (RuntimeException error) { throw new IOException("Invalid JSON", error); }
     }
-    private static JsonElement read(JsonReader reader, int depth, int[] count) throws IOException {
+    private static JsonElement read(JsonReader reader, int depth, int[] count, boolean opaqueNumbers) throws IOException {
         if (depth > 32 || ++count[0] > 40_000) throw new IOException("JSON is too deeply nested or complex");
         return switch (reader.peek()) {
             case BEGIN_OBJECT -> {
@@ -52,20 +65,24 @@ public final class TemplateJson {
                 while (reader.hasNext()) {
                     String key = reader.nextName();
                     if (!keys.add(key)) throw new IOException("Duplicate JSON property");
-                    object.add(key, read(reader, depth + 1, count));
+                    object.add(key, read(reader, depth + 1, count, opaqueNumbers));
                 }
                 reader.endObject(); yield object;
             }
             case BEGIN_ARRAY -> {
                 reader.beginArray(); var array = new JsonArray();
-                while (reader.hasNext()) array.add(read(reader, depth + 1, count));
+                while (reader.hasNext()) array.add(read(reader, depth + 1, count, opaqueNumbers));
                 reader.endArray(); yield array;
             }
             case STRING -> new JsonPrimitive(reader.nextString());
             case NUMBER -> {
                 String token = reader.nextString();
-                // Limit exponents before BigDecimal/schema comparisons can allocate.
-                if (token.length() > 128 || token.matches(".*[eE][+-]?\\d{5,}.*")) throw new IOException("Number exceeds inspection limits");
+                if (!opaqueNumbers && (token.length() > 128 || token.matches(".*[eE][+-]?\\d{5,}.*")))
+                    throw new IOException("Number exceeds control-message inspection limits");
+                // Strict JSON syntax and the document budgets were checked by
+                // the streaming reader. Keep the token lexical here: unknown
+                // fields may contain long integers or enormous exponents that
+                // must survive saves without rounding or decimal expansion.
                 yield JsonParser.parseString(token);
             }
             case BOOLEAN -> new JsonPrimitive(reader.nextBoolean());
@@ -74,21 +91,39 @@ public final class TemplateJson {
         };
     }
     public void inspect(byte[] bytes, boolean publishing) throws IOException {
-        JsonObject root = parse(bytes);
-        if (!root.has("format_version") || !root.get("format_version").isJsonPrimitive() || !root.getAsJsonPrimitive("format_version").isNumber() || root.get("format_version").getAsBigDecimal().compareTo(BigDecimal.ONE) != 0) throw new IOException("Template format_version must be 1");
+        JsonObject root = parseDocument(bytes);
+        if (!root.has("format_version") || decimal(root.get("format_version"), "$.format_version").compareTo(BigDecimal.ONE) != 0) throw new IOException("Template format_version must be 1");
         if (!publishing) return;
         validate(root, schema, "$", 0);
         JsonObject phases = object(root, "phases");
-        BigDecimal previous = BigDecimal.valueOf(101);
+        double previous = 100;
+        int phaseIndex = 0;
         if (phases != null) for (var phase : phases.entrySet()) {
             JsonObject value = phase.getValue().getAsJsonObject();
-            JsonElement cutoff = value.get("minimum_health_percent");
-            if (cutoff != null && !cutoff.isJsonNull()) {
-                BigDecimal next = cutoff.getAsBigDecimal();
-                if (next.compareTo(previous) >= 0) throw new IOException("Phase health cutoffs must descend");
+            // The last phase covers the remainder. Its stored cutoff still
+            // receives ordinary scalar validation, but never orders phases.
+            if (phaseIndex < phases.size() - 1) {
+                JsonElement cutoff = value.get("minimum_health_percent");
+                double next;
+                if (cutoff == null || cutoff.isJsonNull()) {
+                    // Match the native compiler's virtual fallback and clamp;
+                    // never insert that fallback into the saved JSON document.
+                    double fallback = 100.0 * (phases.size() - phaseIndex - 1) / phases.size();
+                    next = Math.clamp(fallback, 0, previous);
+                } else {
+                    BigDecimal exact = decimal(cutoff, "$.phases." + phase.getKey() + ".minimum_health_percent");
+                    if (exact.signum() < 0 || exact.compareTo(BigDecimal.valueOf(100)) > 0)
+                        throw new IOException("Non-final phase health cutoffs must not increase (0–100)");
+                    // Health ordering uses native double precision. Exact
+                    // scalar bounds still apply, and the raw token is retained.
+                    next = Math.max(0, exact.doubleValue());
+                    if (next > previous)
+                        throw new IOException("Non-final phase health cutoffs must not increase (0–100)");
+                }
                 previous = next;
             }
             checkPairs(value);
+            phaseIndex++;
         }
         checkPairs(root);
         JsonObject loot = object(root, "loot");
@@ -101,7 +136,48 @@ public final class TemplateJson {
         if (entries != null) for (var entry : entries.entrySet()) pair(entry.getValue().getAsJsonObject(), "min_count", "max_count");
     }
     private static void pair(JsonObject object, String min, String max) throws IOException {
-        if (object.has(min) && object.has(max) && !object.get(min).isJsonNull() && !object.get(max).isJsonNull() && object.get(min).getAsBigDecimal().compareTo(object.get(max).getAsBigDecimal()) > 0) throw new IOException(min + " exceeds " + max);
+        if (object.has(min) && object.has(max) && !object.get(min).isJsonNull() && !object.get(max).isJsonNull()
+                && decimal(object.get(min), min).compareTo(decimal(object.get(max), max)) > 0)
+            throw new IOException(min + " exceeds " + max);
+    }
+    /** Bounded comparisons for schema-covered values, never opaque data. This
+     * retains the old publication arithmetic range without imposing the tighter
+     * edit-only precision/scale rules on unchanged legacy values. No caller
+     * formats a decimal as an expanded string or converts it to an exact integer. */
+    private static BigDecimal decimal(JsonElement value, String path) throws IOException {
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
+            throw new IOException(path + ": expected a number");
+        String token = value.getAsString();
+        int maxText = clockwork.bosses.ClockworkBossNumbers.MAX_TEXT;
+        if (token.length() > maxText) throw new IOException(path + ": number exceeds inspection limits");
+        int exponentAt = Math.max(token.indexOf('e'), token.indexOf('E'));
+        if (exponentAt >= 0) {
+            int digit = exponentAt + 1;
+            if (token.charAt(digit) == '+' || token.charAt(digit) == '-') digit++;
+            while (digit < token.length() && token.charAt(digit) == '0') digit++;
+            // The streaming parser already validated the exponent syntax.
+            // Normalize its spelling, not its numeric value or saved token.
+            if (token.length() - digit > 4) throw new IOException(path + ": number exceeds inspection limits");
+        }
+        try {
+            BigDecimal number = new BigDecimal(token);
+            // Construction parses a short token without expanding its exponent.
+            // Check scale before comparison or trailing-zero/integer inspection.
+            if (number.scale() < -MAX_INSPECTED_EXPONENT
+                    || number.scale() > MAX_INSPECTED_EXPONENT + maxText)
+                throw new IOException(path + ": number exceeds inspection limits");
+            return number;
+        } catch (NumberFormatException invalid) {
+            throw new IOException(path + ": invalid bounded number", invalid);
+        }
+    }
+    /** Numeric constants use exact guarded comparison rather than Gson's
+     * potentially rounded double equality; other JSON constants keep their type. */
+    private static boolean sameValue(JsonElement value, JsonElement expected, String path) throws IOException {
+        if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()
+                && expected.isJsonPrimitive() && expected.getAsJsonPrimitive().isNumber())
+            return decimal(value, path).compareTo(decimal(expected, "schema constant")) == 0;
+        return value.equals(expected);
     }
     private static JsonObject object(JsonObject root, String key) { return root.has(key) && root.get(key).isJsonObject() ? root.getAsJsonObject(key) : null; }
     private void validate(JsonElement value, JsonObject definition, String path, int depth) throws IOException {
@@ -113,19 +189,23 @@ public final class TemplateJson {
             // The export's referenced definitions have no sibling constraints.
             return;
         }
+        // Only constraints that actually interpret a numeric value need a
+        // decimal. Empty/additional-properties schemas leave addon data opaque.
+        BigDecimal number = value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()
+                && (definition.has("type") || definition.has("minimum") || definition.has("maximum")
+                || definition.has("const") || definition.has("enum")) ? decimal(value, path) : null;
         if (definition.has("type")) {
             JsonElement types = definition.get("type"); boolean accepted = false;
-            if (types.isJsonArray()) for (var type : types.getAsJsonArray()) accepted |= typeMatches(value, type.getAsString());
-            else accepted = typeMatches(value, types.getAsString());
+            if (types.isJsonArray()) for (var type : types.getAsJsonArray()) accepted |= typeMatches(value, type.getAsString(), number);
+            else accepted = typeMatches(value, types.getAsString(), number);
             if (!accepted) throw new IOException(path + ": wrong value type");
         }
-        if (definition.has("const") && !value.equals(definition.get("const"))) throw new IOException(path + ": unsupported constant");
+        if (definition.has("const") && !sameValue(value, definition.get("const"), path)) throw new IOException(path + ": unsupported constant");
         if (definition.has("enum")) {
-            boolean found = false; for (var option : definition.getAsJsonArray("enum")) found |= value.equals(option);
+            boolean found = false; for (var option : definition.getAsJsonArray("enum")) found |= sameValue(value, option, path);
             if (!found) throw new IOException(path + ": unsupported option");
         }
-        if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
-            BigDecimal number = value.getAsBigDecimal();
+        if (number != null) {
             if (definition.has("minimum") && number.compareTo(definition.get("minimum").getAsBigDecimal()) < 0 || definition.has("maximum") && number.compareTo(definition.get("maximum").getAsBigDecimal()) > 0) throw new IOException(path + ": number out of range");
         }
         if (value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()) {
@@ -162,13 +242,13 @@ public final class TemplateJson {
         }
     }
     private boolean matches(JsonElement value, JsonObject definition, String path, int depth) { try { validate(value, definition, path, depth + 1); return true; } catch (IOException failure) { return false; } }
-    private static boolean typeMatches(JsonElement value, String type) {
+    private static boolean typeMatches(JsonElement value, String type, BigDecimal number) {
         return switch (type) {
             case "object" -> value.isJsonObject(); case "array" -> value.isJsonArray(); case "null" -> value.isJsonNull();
             case "string" -> value.isJsonPrimitive() && value.getAsJsonPrimitive().isString();
             case "boolean" -> value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean();
             case "number" -> value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber();
-            case "integer" -> value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber() && value.getAsBigDecimal().stripTrailingZeros().scale() <= 0;
+            case "integer" -> number != null && number.stripTrailingZeros().scale() <= 0;
             default -> false;
         };
     }

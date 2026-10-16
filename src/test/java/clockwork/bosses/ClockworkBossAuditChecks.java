@@ -34,6 +34,8 @@ public final class ClockworkBossAuditChecks {
         assertions += ClockworkBossSoundDistanceChecks.run();
         assertions += ClockworkBossTemplateSchemaChecks.run();
         assertions += ClockworkBossPvpChecks.run();
+        assertions += ClockworkBossFaceChecks.run();
+        assertions += ClockworkBossBurrowSettingsChecks.run();
         if (args.length > 0) Files.writeString(Path.of(args[0]),
                 ClockworkBossTemplateDocument.write(ClockworkBossTemplateDocument.defaults()));
         System.out.println("Clockwork Boss audit checks passed: " + assertions + " assertions.");

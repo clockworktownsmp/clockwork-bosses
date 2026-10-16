@@ -127,3 +127,13 @@ id_ed25519
 
 # Local agent instructions, at any directory depth.
 [Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+
+# Python caches and local environments for optional development checks.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Generated VPS execution receipts; launcher source remains reviewable.
+/vps/evidence/

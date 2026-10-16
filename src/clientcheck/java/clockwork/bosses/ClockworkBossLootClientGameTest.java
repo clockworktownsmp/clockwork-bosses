@@ -12,6 +12,11 @@ public final class ClockworkBossLootClientGameTest implements FabricClientGameTe
             context.waitFor(client -> client.level != null && client.player != null);
             context.runOnClient(ClockworkBossClientChecks::check);
             int checks = context.computeOnClient(ClockworkBossLootGuiChecks::run);
+            int faceChecks = context.computeOnClient(clockwork.bosses.client.ClockworkBossFaceGuiChecks::run);
+            context.runOnClient(clockwork.bosses.client.ClockworkBossFaceGuiChecks::preview);
+            context.waitTicks(3);
+            context.runOnClient(clockwork.bosses.client.ClockworkBossFaceGuiChecks::assertRendered);
+            context.takeScreenshot("face-controls-hurt-sad");
             context.runOnClient(client -> ClockworkBossLootGuiChecks.preview(client, ""));
             context.waitTicks(2);
             context.takeScreenshot("loot-picker-all");
@@ -19,8 +24,8 @@ public final class ClockworkBossLootClientGameTest implements FabricClientGameTe
             context.waitTicks(2);
             context.takeScreenshot("loot-picker-diamond");
             context.setScreen(() -> null);
-            context.runOnClient(client -> java.nio.file.Files.writeString(java.nio.file.Path.of("loot-gui-check-result.txt"), "PASS:" + checks));
-            System.out.println("CLOCKWORK_LOOT_GUI_CHECK_PASS: " + checks + " native GUI assertions and rendered picker screenshots");
+            context.runOnClient(client -> java.nio.file.Files.writeString(java.nio.file.Path.of("loot-gui-check-result.txt"), "PASS:" + checks + ":faces=" + faceChecks));
+            System.out.println("CLOCKWORK_LOOT_GUI_CHECK_PASS: " + checks + " loot GUI assertions, " + faceChecks + " face GUI assertions and rendered screenshots");
         } catch (Exception failure) {
             throw new AssertionError("Loot GUI check failed", failure);
         }

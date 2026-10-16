@@ -177,6 +177,12 @@ tasks.register('templateTaskChecks', JavaExec) {
     mainClass = 'clockwork.bosses.ClockworkBossTemplateTaskChecks'
 }
 check.dependsOn templateTaskChecks
+tasks.register('encounterApiChecks', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'clockwork.bosses.ClockworkBossApiChecks'
+}
+check.dependsOn encounterApiChecks
 
 // The workshop is a server module in this mod. Its file/API suites use only
 // disposable fixtures; no real server mount, hosted website or player data.

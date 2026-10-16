@@ -3,6 +3,96 @@
 Use this checklist before putting the current build into an arena your players will use.
 Current checks appear first; dated sections below retain earlier release evidence.
 
+## 0.3.0-rc.3 accepted checkpoint - 2026-10-16
+
+The owner confirmed the isolated ten-block-radius playtest works. The exact
+rc.3 jar remains unchanged. See [the rc.3 checkpoint report](CHECKPOINT_0.3.0-rc.3.md)
+for its hash, 34-tick post-burrow emergence, damage/radius defaults, build results
+and validation limits. Earlier native results remain attributed to their own
+versions. This checkpoint does not deploy a jar or change hosted compatibility.
+
+## Historical 0.3.0-rc.1 emergence and Fabric playtest candidate — 2026-10-16
+
+Prepared one universal jar for isolated human playtesting, **not deployment or
+release signoff**. Its version is `0.3.0-rc.1`, Workshop channel is explicitly
+`beta`, and addon API remains experimental revision 1. The original minimum
+Loader `0.19.5` and Fabric API `0.161.0+26.3` requirements are unchanged.
+The stable 0.2.1 checkout/artifact, previous checkpoints and other owners' work
+are preserved. No commit, push, tag, existing profile/server install or hosted
+site change occurred.
+
+Jar: `clockwork_bosses-0.3.0-rc.1.jar`, 1,466,897 bytes. SHA-256:
+
+```text
+2798b7db1d1ca09ea19552ba713b899b861051ab8f03d6e8951f9ea2d91e469f
+```
+
+Returning from a burrow samples the full native emergence clip at threefold
+speed, with a 45-tick server deadline captured when emergence actually starts.
+Initial activation retains the native 134-tick emergence. Scoped restoration
+clears the new synchronized LONG timestamp on completion and interruption;
+ordinary Wardens retain native playback. Matching updated client/server jars
+are required for the accelerated visual. The existing optional-client presence
+check does not negotiate this metadata change by jar version.
+
+All runtime rows below use Minecraft 26.3 / Java 25.0.4.1. Newest versions were
+checked against official Fabric metadata on October 16; Loader 0.20.0 was
+explicitly marked unstable.
+
+| Loader / Fabric API | Source-based native regressions | Native client model | Exact packaged dedicated-server boot |
+| --- | --- | --- | --- |
+| 0.19.5 / 0.161.0+26.3 (pinned) | 5 required passes | 6,480 component comparisons pass | Not run in this pass |
+| 0.19.5 / 0.163.0+26.3 (latest stable tuple) | 5 required passes | 6,480 component comparisons pass | Passed core/native command replies and graceful stop |
+| 0.20.0 / 0.163.0+26.3 (preview Loader) | 5 required passes | 6,480 component comparisons pass | Passed core/native command replies and graceful stop |
+
+Native tests cover three repeated real burrow/melee cycles, exactly 45 ticks
+from actual emergence to attack (including a delayed controller tick), native
+134-tick activation, stale-pose release, six interruption paths both buried and
+emerging, prior visibility/gravity restoration, and native LONG packet
+serialization/filtering/gap remapping. The unload case invokes Fabric's actual
+event receiver; it is not a physical chunk-unload test. Native client checks
+compare the transformed renderer/model against the original complete keyframe
+clip at explicit accelerated times, including the final frame, partial ticks,
+late tracking and ordinary/initial controls.
+
+All 335 production class bytes and 22 nonmetadata resources in the Linux-tested
+source launches match this immutable jar. Source-launch metadata differs only
+in the explicitly overridden dependency strings and Loom's nested-library
+descriptor. Actual packaged boots use the original jar with its unchanged
+minimum requirements, fresh loopback-only worlds, disabled Workshop, no test
+mods and no player login. All 17 owned execution scopes, including the rejected
+short plan below, were independently inactive with absent/empty cgroups.
+
+Common/client/GameTest/Better Combat fixture compilation passed. The complete
+core check graph passed against the newest stable API, including 74,241 audit
+assertions and registered Workshop/file-worker suites. The exact jar passed
+23 isolated Workshop assertions, and the preserved beta.6 compiled API probe
+linked to the candidate interface/constructor/callbacks. This is bounded probe
+coverage, not general addon certification. The kit's low-damage template passed
+the actual jar's bundled schema and sequence parser.
+
+Two relevant failures remain in the evidence: a sound-upload fixture leaked
+its read handle, so Windows refused the later atomic draft replacement; closing
+that fixture-owned stream fixed the check without changing production writes.
+A read-only boot-plan helper exited before its cgroup could be measured; the
+guard correctly refused acceptance. Fresh boot-only inputs now wait for their
+exact parent's measured admission, with optimization disabled and all original
+resource/cleanup checks retained. No failed receipt was overwritten. Packaged
+flat-world boot logs retain a native empty-generator warning; both servers
+created their new world, answered commands and exited normally.
+
+**Remaining manual/release gates:** real networked players, matching-client and
+no-core client join/visibility, actual Better Combat/Combat Roll/modpack and
+grave behavior, pixel appearance, permission-provider checks, latency and
+sustained performance. Software-rendered detached-entity model checks do not
+establish these. A vanilla client cannot render the custom threefold clip;
+its burrow/stale-animation visibility remains uncertified. Existing addon and
+Observatory binaries are not rebuilt/certified here. Hosted Workshop rc.1
+editing is not enabled; paired browser/core validation and a separately approved
+compatibility publication remain outstanding. The playtest kit includes both
+the easy burrow fixture and a separate broader 0.3 checklist with these checks
+explicitly Not run.
+
 ## Publish autocomplete — prepared 0.3.0-beta.5, 2026-10-13
 
 Common/client compilation and jar/source packaging succeed. No regression
@@ -1433,6 +1523,8 @@ browser rendering of the prepared fix was unavailable; no live site was deployed
 
 ## Eyebrow expressions and rotation — development source, 2026-10-13
 
+Initial source-only preparation; superseded by the tested beta.6 checkpoint below.
+
 Added Angry, Neutral, Curious and Sad presets with independent left/right
 rotation in whole degrees from -45 to 45. Shape changes preserve positions;
 Reset restores selected positions and zero rotation without changing expression.
@@ -1464,3 +1556,55 @@ requested or run. Native GUI scales, rotated glow in-world, resource reload and
 multiple-boss rendering and event priority/cooldown/interruption behavior still
 need playtesting. No jar was packaged or deployed,
 and the hosted stable/beta sites and installed server/client files are unchanged.
+
+## 0.3.0-beta.6 tested checkpoint — 2026-10-13
+
+Existing PvP, Better Combat/potion and face features are now packaged with distinct
+beta.6 version/explicit beta metadata. No additional roadmap feature was added.
+The full offline build passed, with 74,241 audit assertions; native servers passed
+56 required tests without Better Combat and 63 with it, then 63 with Lithium too.
+Native client/atlas checks passed 2,700 model comparisons, 65,536 emissive pixels
+and 393,217 face assertions. Native GUI checks passed 1,104 loot and 130 face
+assertions at three representative sizes, plus rendered-preview checks/screenshots.
+Final GUI also used current EMF 3.3.11/ETF 7.2.5 with Sodium/Lithium.
+
+Exact jar/API tests passed 23 assertions; packaged dedicated-server command/fight/
+shutdown, disabled/unavailable Workshop and old-companion rejection passed.
+Every packaged class and schema was compared with checked outputs. Test fixtures,
+private data and website source are excluded. Seven presets include face defaults.
+The local website's 68 checks and actual browser lossless roundtrip passed.
+
+Hosted beta is still website rc.3, declares beta.4/beta.3/0.2.0 only, and correctly
+blocks beta.6 edits/publishing. Its controls/schema do not yet contain this face
+feature. No deployment or compatibility guard bypass occurred. Real multiplayer,
+latency, full-pack, gravestone behavior and heap/TPS measurements remain pending.
+See [the checkpoint report](CHECKPOINT_0.3.0-beta.6.md) for exact artifact hash,
+versions, evidence boundaries and manual playtest steps.
+
+## Burrow visibility correction - tested source, 2026-10-15
+
+Prepared 0.2.1 from the v0.2.0 release base and the equivalent 0.3.0-beta.8
+development change. No distributable was packaged, installed or deployed.
+Before-fix native and client regressions reproduced a visible server flag with
+an obsolete native digging animation still translating the model underground.
+The existing marked-Warden pose-data callback now releases only obsolete
+DIGGING/EMERGING animation states before vanilla starts the next pose animation.
+The burrow checkpoint still owns original invisibility, silence, gravity and
+surface recovery; this correction does not replace that cleanup or add polling.
+
+Both final version identities passed the three focused native tests and 756
+native-client model comparisons. Three real action cycles retained 134 ticks
+between emergence and the next attacking subphase. Each client emergence starts
+fresh; interruption/phase/reload/removal/failed-stop cleanup and a previously
+invisible boss were checked, while ordinary Wardens retain native behavior.
+The unload test invokes Fabric's unload callback; it is not physical chunk-unload
+coverage. Client model checks use detached entities and software rendering, not
+packet delivery or pixel acceptance. A matching corrected Clockwork client is
+required for this client-local animation correction; unchanged vanilla clients
+are not certified fixed. Human visual/modpack acceptance remains pending.
+
+Review receipts, source manifests and before/after limits are in the ignored
+outputs/burrow-visibility-20261015 folder. Early fixture/launcher failures remain
+preserved separately from passing final runs. Workshop editing compatibility for
+core 0.2.1 and beta.8 still needs an explicit website allowlist review; this work
+does not update the website, relay, wiki or existing playtest kits.

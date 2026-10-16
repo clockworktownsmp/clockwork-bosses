@@ -44,15 +44,18 @@ public final class BetaWorkshopJarChecks {
             : HttpRequest.BodyPublishers.ofByteArray(bytes)).build(), HttpResponse.BodyHandlers.ofByteArray());
     }
     public static void main(String[] args) throws Exception {
+        // Old beta.4 receipts remain reproducible. A checkpoint deliberately
+        // supplies its exact version; do not infer support from a suffix/range.
+        String expectedVersion = System.getProperty("clockwork.test.mod_version", "0.3.0-beta.4");
         check(TemplateApi.class.getProtectionDomain().getCodeSource().getLocation().toString()
-            .endsWith("clockwork_bosses-0.3.0-beta.4.jar"), "exact packaged beta API must be loaded");
+            .endsWith("clockwork_bosses-" + expectedVersion + ".jar"), "exact packaged beta API must be loaded");
         JsonObject packaged;
         try (var input = TemplateApi.class.getResourceAsStream("/fabric.mod.json")) {
             packaged = TemplateJson.parse(input.readAllBytes());
         }
         var mod = WorkshopRelease.from(packaged.get("version").getAsString(),
             packaged.getAsJsonObject("custom").get("clockwork_bosses:workshop_build_channel").getAsString());
-        check(mod.version().equals("0.3.0-beta.4") && mod.channel() == WorkshopRelease.Channel.BETA, "installed version/channel come from actual jar metadata");
+        check(mod.version().equals(expectedVersion) && mod.channel() == WorkshopRelease.Channel.BETA, "installed version/channel come from actual jar metadata");
         var settings = new Properties(); settings.setProperty("use_build_channel", "true");
         check(WorkshopSettings.select(settings, mod.channel()).origin().equals(URI.create("https://beta.clockworkboss.com")), "browser and server select the public beta origin");
         JsonObject declaration;
@@ -124,6 +127,6 @@ public final class BetaWorkshopJarChecks {
             metadata.set(declaration); compatibility.refresh(true); allowed.set(false);
             check(request(client, origin, "PUT", "/api/drafts/revoked", cookie, json, write(csrf, "none", "none")).statusCode() == 401, "compatibility never overrides revoked owner permission");
         }
-        System.out.println("PASS: exact beta.4 jar, declared independent website version, owner/CSRF/origin/session isolation, draft edit, raw audio, exact publication and withdrawn-support guards (" + checks + " assertions)");
+        System.out.println("PASS: exact " + expectedVersion + " jar, declared independent website version, owner/CSRF/origin/session isolation, draft edit, raw audio, exact publication and withdrawn-support guards (" + checks + " assertions)");
     }
 }

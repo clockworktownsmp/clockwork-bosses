@@ -2,6 +2,9 @@ package clockwork.bosses.client;
 
 /** Client-side access to Clockwork Boss visual data stored on a Warden render state. */
 public interface WardenRenderStateVisuals {
+    /** Accelerated native clip time after burrow, or -1 for ordinary emergence. */
+    long clockworkBosses$getBurrowEmergenceMillis();
+    void clockworkBosses$setBurrowEmergenceMillis(long millis);
     long clockworkBosses$getMeleeMillis();
     void clockworkBosses$setMeleeMillis(long millis);
     int clockworkBosses$getEyes();

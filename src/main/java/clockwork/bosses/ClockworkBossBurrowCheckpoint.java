@@ -27,6 +27,7 @@ public record ClockworkBossBurrowCheckpoint(Vec3 origin, String dimension,
     /** Restore only in the original, already-loaded chunk; never load chunks as
      * part of cleanup. Flags are restored even after native removal began. */
     public void restore(Warden boss) {
+        ((ClockworkBossMarker) boss).clockworkBosses$clearBurrowEmergence();
         if (dimension.equals(boss.level().dimension().identifier().toString())
                 && boss.level().getChunkSource().hasChunk(((int) Math.floor(origin.x)) >> 4, ((int) Math.floor(origin.z)) >> 4))
             boss.snapTo(origin.x, Math.clamp(origin.y, boss.level().getMinY(), boss.level().getMaxY() - 1),

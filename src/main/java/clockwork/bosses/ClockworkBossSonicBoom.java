@@ -160,11 +160,11 @@ public final class ClockworkBossSonicBoom {
         float before = target.getHealth();
         Vec3 velocity = capture ? target.getDeltaMovement() : null;
         if (capture) ClockworkBossDiagnostics.event(warden, target, "sonic_native_attempt", "hp_before", before, "damage", settings.damage(), "impact_eligible", true);
-        boolean accepted = target.hurtServer(
-                level,
-                level.damageSources().sonicBoom(warden),
-                (float) settings.damage()
-        );
+        var sourceDamage = level.damageSources().sonicBoom(warden);
+        boolean accepted;
+        try (var observation = ClockworkBossVitals.action(warden, target, ClockworkBossActions.SONIC, sourceDamage)) {
+            accepted = target.hurtServer(level, sourceDamage, (float) settings.damage());
+        }
         if (accepted) {
             ClockworkBossManager.onAttackLanded(warden, target, ClockworkBossActions.SONIC, Math.max(0, before - target.getHealth()));
             ClockworkBossManager.onSuccessfulAttack(warden);

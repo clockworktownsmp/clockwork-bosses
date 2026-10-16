@@ -1,0 +1,12 @@
+# Private disposable playtest kit. Native parser validates these exact commands.
+gamemode survival @a
+tp @a 0 71 -8
+item replace entity @a armor.head with minecraft:diamond_helmet[minecraft:enchantments={"minecraft:protection":4,"minecraft:unbreaking":3}]
+item replace entity @a armor.chest with minecraft:diamond_chestplate[minecraft:enchantments={"minecraft:protection":4,"minecraft:unbreaking":3}]
+item replace entity @a armor.legs with minecraft:diamond_leggings[minecraft:enchantments={"minecraft:protection":4,"minecraft:unbreaking":3}]
+item replace entity @a armor.feet with minecraft:diamond_boots[minecraft:enchantments={"minecraft:protection":4,"minecraft:unbreaking":3}]
+give @a minecraft:netherite_sword[minecraft:enchantments={"minecraft:sharpness":5,"minecraft:sweeping_edge":3,"minecraft:looting":3,"minecraft:fire_aspect":2,"minecraft:knockback":2,"minecraft:unbreaking":3,"minecraft:mending":1}]
+give @a minecraft:netherite_axe[minecraft:enchantments={"minecraft:sharpness":5,"minecraft:efficiency":5,"minecraft:fortune":3,"minecraft:unbreaking":3,"minecraft:mending":1}]
+give @a minecraft:shield
+give @a minecraft:cooked_beef 64
+give @a minecraft:golden_apple 8

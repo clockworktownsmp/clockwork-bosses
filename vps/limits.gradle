@@ -1,0 +1,24 @@
+// Only the disposable core API candidate uses this init script. Normal local
+// build output and the preserved beta.6 artifact are never selected here.
+beforeProject { project ->
+    project.layout.buildDirectory.set(project.layout.projectDirectory.dir('build/api4-candidate'))
+}
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        maxHeapSize = name == 'runGametest' ? '3g' : '512m'
+        jvmArgs '-XX:ActiveProcessorCount=4'
+        if (name == 'runGametest') {
+            jvmArgs '-Dfabric-api.gametest.filter=clockwork_bosses_regression:clockwork_boss_api_game_tests_*'
+            jvmArgs '-Dclockwork_bosses.api4.guard=true'
+        }
+        if (name == 'encounterApiChecks') {
+            systemProperty 'clockwork.api.legacyJar', System.getenv('CLOCKWORK_CORE_BASELINE')
+            doFirst { systemProperty 'clockwork.api.compileClasspath', project.sourceSets.main.compileClasspath.asPath }
+        }
+    }
+    tasks.withType(Test).configureEach {
+        maxHeapSize = '512m'
+        maxParallelForks = 1
+        jvmArgs '-XX:ActiveProcessorCount=4'
+    }
+}

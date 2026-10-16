@@ -14,6 +14,7 @@ import net.minecraft.client.renderer.entity.state.WardenRenderState;
 public final class ClockworkBossClientChecks implements ClientModInitializer {
     private static int comparisons;
     private static int maskChecks;
+    private static int faceChecks;
     private static boolean started, done;
     private static long deadline;
     @Override public void onInitializeClient() {
@@ -31,8 +32,8 @@ public final class ClockworkBossClientChecks implements ClientModInitializer {
             done = true;
             try {
                 check(client);
-                System.out.println("CLOCKWORK_CLIENT_CHECK_PASS: " + comparisons + " native model component comparisons, " + maskChecks + " emissive pixels");
-                java.nio.file.Files.writeString(java.nio.file.Path.of("client-check-result.txt"), "PASS:" + comparisons + ":masks=" + maskChecks);
+                System.out.println("CLOCKWORK_CLIENT_CHECK_PASS: " + comparisons + " native model component comparisons, " + maskChecks + " emissive pixels, " + faceChecks + " face mask assertions");
+                java.nio.file.Files.writeString(java.nio.file.Path.of("client-check-result.txt"), "PASS:" + comparisons + ":masks=" + maskChecks + ":faces=" + faceChecks);
             } catch (Throwable failure) {
                 failure.printStackTrace();
                 System.err.println("CLOCKWORK_CLIENT_CHECK_FAIL");
@@ -45,6 +46,7 @@ public final class ClockworkBossClientChecks implements ClientModInitializer {
 
     static void check(Minecraft client) {
         checkEmissiveMasks(client);
+        checkFaceMasks(client);
         for (int duration : new int[]{1, 2, 34, 68, 200}) {
             for (float fraction : new float[]{0, .25F, .5F, 1}) {
                 long whole = (long) (duration * fraction);
@@ -92,6 +94,49 @@ public final class ClockworkBossClientChecks implements ClientModInitializer {
                 if (retained == 0) throw new AssertionError("Native glow was erased: " + name);
             } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
         }
+    }
+
+    /** Native resource/texture-manager path, for both bright editor and live
+     * masks. Independent expected atlas writes catch clipping, pupil overlap,
+     * signed-ID/cache collisions and unintended changes outside the face. */
+    private static void checkFaceMasks(Minecraft client) {
+        var sourceId = net.minecraft.resources.Identifier.withDefaultNamespace("textures/entity/warden/warden_bioluminescent_layer.png");
+        var eyes = ClockworkBossEyes.DEFAULT;
+        var pupils = ClockworkBossPupils.DEFAULT;
+        try (var input = client.getResourceManager().open(sourceId);
+             var source = com.mojang.blaze3d.platform.NativeImage.read(input)) {
+            for (var expression : ClockworkBossBrows.Expression.values()) for (int angle : new int[]{-45,0,45})
+                for (boolean preview : new boolean[]{false,true}) {
+                    var brows = new ClockworkBossBrows(2,2,10,2,expression,angle,-angle);
+                    var id = clockwork.bosses.client.WardenEmissiveMaskTexture.getTexture(sourceId,eyes.packed(),brows.packed(),pupils.packed(),preview);
+                    if (id == null || !(client.getTextureManager().getTexture(id) instanceof net.minecraft.client.renderer.texture.DynamicTexture texture))
+                        throw new AssertionError("Missing face texture: " + brows);
+                    if (!id.equals(clockwork.bosses.client.WardenEmissiveMaskTexture.getTexture(sourceId,eyes.packed(),brows.packed(),pupils.packed(),preview))
+                            || client.getTextureManager().getTexture(id) != texture) throw new AssertionError("Face cache miss/collision on unchanged pose");
+                    int[] expected = new int[256]; java.util.Arrays.fill(expected,0x00FFFFFF);
+                    for (boolean right : new boolean[]{false,true}) for (int pixel : brows.facePixels(right)) expected[pixel] = preview ? 0xFFFFFFFF : 0x90FFFFFF;
+                    for (int eye = 0; eye < 2; eye++) {
+                        int x = eye == 0 ? 3 : 11;
+                        for (int dy=0;dy<2;dy++) for (int dx=0;dx<2;dx++)
+                            expected[(7+dy)*16+x+dx] = dy==1 && dx==(eye==0?1:0) ? 0xFF666666 : 0xFFFFFFFF;
+                    }
+                    var pixels = texture.getPixels();
+                    for (int y=0;y<128;y++) for (int x=0;x<128;x++) {
+                        int value = x>=10 && x<26 && y>=42 && y<58 ? expected[(y-42)*16+x-10]
+                                : (source.getPixel(x,y)&0xFF000000)|0x00FFFFFF;
+                        faceChecks++;
+                        if (pixels.getPixel(x,y)!=value) throw new AssertionError("Face atlas mismatch: " + expression + "/" + angle + "/" + preview + " at " + x + "," + y);
+                    }
+                }
+            // Resource reload/disconnect uses this ownership cleanup. Rebuilding
+            // the same path must create a fresh texture, not return disposed data.
+            var oldId = clockwork.bosses.client.WardenEmissiveMaskTexture.getTexture(sourceId,eyes.packed(),ClockworkBossBrows.DEFAULT.packed(),pupils.packed(),true);
+            var oldTexture = client.getTextureManager().getTexture(oldId);
+            clockwork.bosses.client.WardenEmissiveMaskTexture.clear();
+            var newId = clockwork.bosses.client.WardenEmissiveMaskTexture.getTexture(sourceId,eyes.packed(),ClockworkBossBrows.DEFAULT.packed(),pupils.packed(),true);
+            if (!oldId.equals(newId) || client.getTextureManager().getTexture(newId)==oldTexture) throw new AssertionError("Face clear did not rebuild owned texture");
+            faceChecks++;
+        } catch (java.io.IOException failure) { throw new java.io.UncheckedIOException(failure); }
     }
 
     private static void compare(Minecraft client, long millis, boolean marked, boolean melee) {

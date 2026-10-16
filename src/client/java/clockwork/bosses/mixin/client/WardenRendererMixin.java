@@ -6,6 +6,7 @@ import clockwork.bosses.client.WardenSkinTextureCache;
 import clockwork.bosses.ClockworkBossMarker;
 import net.minecraft.client.renderer.entity.WardenRenderer;
 import net.minecraft.client.renderer.entity.state.WardenRenderState;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.monster.warden.Warden;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -50,6 +51,8 @@ public abstract class WardenRendererMixin {
         // progress before a client begins tracking; metadata is parsed only on change.
         visuals.clockworkBosses$setSonicMillis(marker.clockworkBosses$sonicVisualMillis(entity.level().getGameTime(), partialTicks));
         visuals.clockworkBosses$setMeleeMillis(marker.clockworkBosses$meleeVisualMillis(entity.level().getGameTime(), partialTicks));
+        visuals.clockworkBosses$setBurrowEmergenceMillis(entity.hasPose(Pose.EMERGING)
+                ? marker.clockworkBosses$burrowEmergenceMillis(entity.level().getGameTime(), partialTicks) : -1);
 
 
     }

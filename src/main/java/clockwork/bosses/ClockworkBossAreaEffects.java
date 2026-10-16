@@ -301,4 +301,30 @@ public final class ClockworkBossAreaEffects {
             this.player = player;
         }
     }
+
+    static void collectPlayers(UUID boss, Map<UUID, ServerPlayer> players) {
+        for (var member : PLAYERS.values()) if (member.bosses.containsKey(boss)) players.putIfAbsent(member.player.getUUID(), member.player);
+    }
+    /** Inspect actual matching tagged effects even after a vetoed release dropped
+     * its request. Identity protects external replacements during normal cleanup;
+     * recovery markers additionally reveal orphaned native grants here. */
+    static clockwork.bosses.api.BossSupportSnapshot.Effects snapshot(ServerPlayer player) {
+        var member = PLAYERS.get(player.getUUID());
+        if (member != null && member.player != player) member = null;
+        var owners = member == null ? Set.<UUID>of() : Set.copyOf(member.bosses.keySet());
+        var amplifiers = new HashMap<String, Integer>();
+        var markers = new java.util.HashSet<String>();
+        for (Type type : TYPES) {
+            var effect = player.getEffect(type.effect);
+            for (int amplifier = 0; amplifier < 5; amplifier++) {
+                String marker = type.tag(amplifier);
+                if (!player.entityTags().contains(marker)) continue;
+                markers.add(marker);
+                if (effect != null && effect.getAmplifier() == amplifier && effect.isInfiniteDuration()
+                        && effect.isAmbient() && !effect.isVisible() && effect.showIcon()) amplifiers.put(type.key, amplifier);
+            }
+            if (member != null && effect != null && member.owned.get(type) == effect) amplifiers.put(type.key, effect.getAmplifier());
+        }
+        return new clockwork.bosses.api.BossSupportSnapshot.Effects(owners, amplifiers, markers);
+    }
 }

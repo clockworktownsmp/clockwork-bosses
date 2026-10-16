@@ -13,6 +13,10 @@ public interface ClockworkBossMarker {
     /** Recovery journal for an interrupted core burrow, saved independently of runtime actions. */
     ClockworkBossBurrowCheckpoint clockworkBosses$getBurrowCheckpoint();
     void clockworkBosses$setBurrowCheckpoint(ClockworkBossBurrowCheckpoint checkpoint);
+    /** Transient post-burrow visual time; initial activation keeps native playback. */
+    void clockworkBosses$beginBurrowEmergence(long now);
+    void clockworkBosses$clearBurrowEmergence();
+    long clockworkBosses$burrowEmergenceMillis(long now, float partialTick);
     /** Saved, bounded UUID ledger prevents reentry/reconnect/reload full-heal farming. */
     boolean clockworkBosses$claimInitialHeal(java.util.UUID player);
     /** Capture melee wind-up/recovery once per swing, never per render frame. */

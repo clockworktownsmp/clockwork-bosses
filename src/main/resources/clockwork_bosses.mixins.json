@@ -11,6 +11,8 @@
     "SonicBoomMixin",
     "RoarMixin",
     "PlayerSupportMixin",
+    "VitalsMixin",
+    "PlayerVitalsMixin",
     "ServerPlayerDataMixin",
     "BrainRecoveryMixin",
     "BossLootMixin",

@@ -1,0 +1,7 @@
+{
+  "required": true,
+  "package": "clockwork.bosses.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": ["BurrowEditorSendProbe"],
+  "injectors": {"defaultRequire": 1}
+}

@@ -11,7 +11,6 @@ import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.monster.warden.Warden;
-import net.minecraft.world.entity.monster.warden.WardenAi;
 import net.minecraft.world.phys.Vec3;
 
 /** Warden-specific native backend. Actions, including core registrations, call
@@ -24,13 +23,17 @@ final class ClockworkBossWardenController implements BossMobController {
     private BossRoarSound roarSound = BossRoarSound.VANILLA;
     private boolean roarFinished, buried, emerging, burrowFinished;
     private int undergroundTicks;
-    private long animationStarted;
+    private long animationStarted, emergenceStarted;
     private double requestedDepth;
     private ClockworkBossBurrowCheckpoint checkpoint;
     private UUID burrowTarget;
     ClockworkBossWardenController(ClockworkBossActionRuntime context) { this.context = context; }
     @Override public Warden mob() { context.checkThread(); return context.boss(); }
     @Override public Set<Identifier> capabilities() { return ClockworkBossActions.WARDEN_CAPABILITIES; }
+    @Override public clockwork.bosses.api.BossTargetRequest requestTarget(ServerPlayer target) {
+        context.checkActive();
+        return ClockworkBossManager.requestTarget(context.boss(), target);
+    }
     private void acquire(Animation next) {
         context.checkActive();
         if (animation != Animation.NONE) throw new IllegalStateException("Use one native animation per action execution");
@@ -60,7 +63,9 @@ final class ClockworkBossWardenController implements BossMobController {
             try { checkpoint.restore(boss); } // Reads the latest committed surface, including successful relocation.
             finally { checkpoint = null; burrowTarget = null; }
         });
-        ((ClockworkBossMarker) boss).clockworkBosses$setBurrowCheckpoint(checkpoint);
+        ClockworkBossMarker marker = (ClockworkBossMarker) boss;
+        marker.clockworkBosses$setBurrowCheckpoint(checkpoint);
+        marker.clockworkBosses$clearBurrowEmergence();
         boss.setPose(Pose.DIGGING);
     }
     @Override public boolean burrowFinished() { context.checkActive(); return burrowFinished; }
@@ -110,11 +115,16 @@ final class ClockworkBossWardenController implements BossMobController {
                     boss.setYRot(facing); boss.setYBodyRot(facing); boss.setYHeadRot(facing);
                     boss.getLookControl().setLookAt(target);
                 }
+                // Publish one start time for the client clip and the server's
+                // deadline. A delayed action tick must still play the whole clip.
+                emergenceStarted = context.gameTime();
+                ((ClockworkBossMarker) boss).clockworkBosses$beginBurrowEmergence(emergenceStarted);
                 boss.setInvisible(checkpoint.invisible()); boss.setSilent(checkpoint.silent()); boss.setPose(Pose.EMERGING);
                 if (!context.active()) return;
-                boss.getBrain().setMemoryWithExpiry(MemoryModuleType.IS_EMERGING, Unit.INSTANCE, WardenAi.EMERGE_DURATION);
+                boss.getBrain().setMemoryWithExpiry(MemoryModuleType.IS_EMERGING, Unit.INSTANCE,
+                        ClockworkBossBurrowEmergence.DURATION_TICKS);
             }
-            burrowFinished = elapsed >= underground + WardenAi.EMERGE_DURATION;
+            burrowFinished = context.gameTime() - emergenceStarted >= ClockworkBossBurrowEmergence.DURATION_TICKS;
         }
     }
     /** Resolve only when emergence is due, using current positions and the

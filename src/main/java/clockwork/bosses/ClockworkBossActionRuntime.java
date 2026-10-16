@@ -227,7 +227,10 @@ public final class ClockworkBossActionRuntime implements BossActionContext {
         checkActive();
         if (!Float.isFinite(amount) || amount < 0 || amount > 1_000_000 || !isParticipant(target)) return false;
         Warden attacker = boss; ClockworkBossState owner = state; float before = target.getHealth();
-        boolean accepted = target.hurtServer(level(), source, amount);
+        boolean accepted;
+        try (var observation = ClockworkBossVitals.action(attacker, target, type.id(), source)) {
+            accepted = target.hurtServer(level(), source, amount);
+        }
         if (accepted) {
             ClockworkBossManager.onAttackLanded(attacker, target, type.id(), Math.max(0, before - target.getHealth()));
             if (active()) ClockworkBossManager.onSuccessfulAttack(attacker);

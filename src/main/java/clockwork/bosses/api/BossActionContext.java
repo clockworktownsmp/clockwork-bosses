@@ -21,6 +21,8 @@ public interface BossActionContext {
     long elapsedTicks();
     /** Current native target, checked for life, dimension and encounter eligibility. */
     Optional<LivingEntity> target();
+    /** Optional native target request; the controller enforces its own policy. */
+    default BossTargetRequest requestTarget(ServerPlayer player) { return controller().requestTarget(player); }
     /** Query the core's current arena membership; no chunks are loaded. */
     List<ServerPlayer> participants();
     boolean isParticipant(ServerPlayer player);

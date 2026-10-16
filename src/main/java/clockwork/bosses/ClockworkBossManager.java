@@ -90,10 +90,12 @@ public final class ClockworkBossManager {
      * encounter work.
      */
     public static void registerLifecycle() {
+        // Claim/capture terminal encounters before the individual support services
+        // perform their redundant server-stop release. ENDED remains after release.
+        ServerLifecycleEvents.SERVER_STOPPING.register(ClockworkBossManager::clearAll);
         ClockworkBossAreaEffects.registerLifecycle();
         ClockworkBossPlayerHealth.registerLifecycle();
         ClockworkBossFightPotion.registerLifecycle();
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> clearAll());
         ServerEntityEvents.ENTITY_LOAD.register(ClockworkBossManager::onEntityLoad);
         ServerEntityEvents.ENTITY_UNLOAD.register(ClockworkBossManager::onEntityUnload);
 
@@ -874,18 +876,25 @@ public final class ClockworkBossManager {
     }
     private static void endEncounter(Warden boss, ClockworkBossState state, clockwork.bosses.api.BossAction.StopReason reason) {
         if (!state.claimEncounterEnd()) return;
-        state.face().clear();
-        syncFace(boss, state);
-        var snapshot = encounterSnapshot(boss, state);
-        if (state.actionRuntime() != null) state.actionRuntime().stop(reason);
-        var departing = state.bossBarPlayerIds();
-        state.setBossBarPlayerIds(Set.of());
-        state.bossBar().removeAllPlayers();
-        ClockworkBossMusic.end(state.uuid());
-        releasePlayerSupport(state.uuid());
-        var departureSnapshot = encounterSnapshot(boss, state);
-        for (var player : departing) clockwork.bosses.api.BossEncounterEvents.PLAYER_LEFT.invoker().onEvent(departureSnapshot, player);
-        clockwork.bosses.api.BossEncounterEvents.ENDED.invoker().onEvent(snapshot, reason);
+        var observation = ClockworkBossEncounterObservers.begin(boss, state, reason);
+        boolean completed = false;
+        try {
+            state.face().clear();
+            syncFace(boss, state);
+            var snapshot = encounterSnapshot(boss, state);
+            if (state.actionRuntime() != null) state.actionRuntime().stop(reason);
+            var departing = state.bossBarPlayerIds();
+            state.setBossBarPlayerIds(Set.of());
+            state.bossBar().removeAllPlayers();
+            ClockworkBossMusic.end(state.uuid());
+            ClockworkBossEncounterObservers.beforeRelease(observation);
+            try { releasePlayerSupport(state.uuid()); }
+            finally { ClockworkBossEncounterObservers.afterRelease(observation); }
+            var departureSnapshot = encounterSnapshot(boss, state);
+            for (var player : departing) clockwork.bosses.api.BossEncounterEvents.PLAYER_LEFT.invoker().onEvent(departureSnapshot, player);
+            clockwork.bosses.api.BossEncounterEvents.ENDED.invoker().onEvent(snapshot, reason);
+            completed = true;
+        } finally { ClockworkBossEncounterObservers.finish(observation, state, completed); }
     }
 
     /** Completed swings/beams choose another opponent; rejected attempts and cancelled charges do not. */
@@ -1044,6 +1053,64 @@ public final class ClockworkBossManager {
      */
     public static ClockworkBossState stateFor(Warden warden) {
         return ACTIVE.get(warden.getUUID());
+    }
+
+    /** Supported request reuses the same native assignment as ordinary rotation.
+     * No target search, forced hold bypass or new cooldown policy is introduced. */
+    public static clockwork.bosses.api.BossTargetRequest requestTarget(Warden boss, ServerPlayer target) {
+        if (!(boss.level() instanceof ServerLevel level) || !level.getServer().isSameThread())
+            throw new IllegalStateException("Target requests require the owning server thread");
+        var state = stateFor(boss);
+        if (state == null) return clockwork.bosses.api.BossTargetRequest.UNSUPPORTED;
+        if (state.encounterEnded() || state.dormant() || state.emerging() || state.currentPhase() == null
+                || !boss.isAlive() || boss.isRemoved() || target == null || target.isRemoved()
+                || target.level() != level || !boss.canTargetEntity(target) || !isPlayerInArena(state.uuid(), target))
+            return clockwork.bosses.api.BossTargetRequest.INELIGIBLE;
+        var current = boss.getTarget();
+        if (current == target) return clockwork.bosses.api.BossTargetRequest.UNCHANGED;
+        if (keepCurrentTarget(boss, current, target)) return clockwork.bosses.api.BossTargetRequest.HELD;
+        long generation = state.subphaseGeneration();
+        ClockworkBossTargets.assign(boss, state, target);
+        return stateFor(boss) == state && !state.encounterEnded() && state.subphaseGeneration() == generation
+                && boss.isAlive() && !boss.isRemoved() && boss.getTarget() == target
+                ? clockwork.bosses.api.BossTargetRequest.ACCEPTED : clockwork.bosses.api.BossTargetRequest.REJECTED;
+    }
+
+    /** Cheap listener-side relevance check: no snapshots, world/player scans or
+     * client bookkeeping. A direct boss source can connect a native hit before
+     * the next viewer diff. Closed encounters never acquire observation state. */
+    static boolean observesVitals(net.minecraft.world.entity.LivingEntity entity, UUID sourceBoss) {
+        var direct = ACTIVE.get(entity.getUUID());
+        if (direct != null && !direct.encounterEnded()) return true;
+        var source = sourceBoss == null ? null : ACTIVE.get(sourceBoss);
+        if (source != null && !source.encounterEnded()) return true;
+        if (entity instanceof ServerPlayer) for (var state : ACTIVE.values())
+            if (!state.encounterEnded() && observesMember(state, entity)) return true;
+        return false;
+    }
+    static boolean observesEncounter(UUID boss) {
+        var state = boss == null ? null : ACTIVE.get(boss);
+        return state != null && !state.encounterEnded();
+    }
+    private static boolean observesMember(ClockworkBossState state, net.minecraft.world.entity.LivingEntity entity) {
+        // addPlayer precedes support entry and committing the cached UUID diff.
+        // Include that actual viewer so the initial health grant is observable.
+        return entity instanceof ServerPlayer player && (state.bossBarPlayerIds().contains(player.getUUID())
+                || state.bossBar().getPlayers().contains(player));
+    }
+    static ClockworkBossVitals.Moments vitalsMoments(net.minecraft.world.entity.LivingEntity entity, UUID sourceBoss) {
+        var result = new ArrayList<clockwork.bosses.api.BossVitalsChange.Moment>();
+        boolean truncated = false;
+        for (var state : ACTIVE.values()) {
+            if (state.encounterEnded() || !(state.uuid().equals(entity.getUUID()) || state.uuid().equals(sourceBoss)
+                    || observesMember(state, entity))) continue;
+            if (result.size() == 64) { truncated = true; break; }
+            var step = state.subphase();
+            result.add(new clockwork.bosses.api.BossVitalsChange.Moment(state.uuid(), state.templateName(), state.name(),
+                    state.dimension().identifier().toString(), state.currentPhase() == null ? "" : state.currentPhase().key(),
+                    step == null ? "" : step.key(), entity.level().getGameTime()));
+        }
+        return new ClockworkBossVitals.Moments(result, truncated);
     }
 
     /** Server visual lifecycle hooks do a loaded-state lookup only. Client
@@ -2254,13 +2321,12 @@ public final class ClockworkBossManager {
      * Releases all loaded encounter state at shutdown; persistent entities stay in
      * Minecraft's world saves.
      */
-    private static void clearAll() {
+    private static void clearAll(MinecraftServer server) {
         for (Restoration pending : RESTORING.values()) pending.entity().setNoAi(pending.noAi());
         RESTORING.clear();
         ClockworkBossAnnouncements.clear();
         for (ClockworkBossState state : List.copyOf(ACTIVE.values())) {
-            var runtime = state.actionRuntime();
-            endEncounter(runtime == null || runtime.closed() ? null : runtime.boss(), state, clockwork.bosses.api.BossAction.StopReason.SERVER_STOPPED);
+            endEncounter(findWardenByState(server, state), state, clockwork.bosses.api.BossAction.StopReason.SERVER_STOPPED);
             cleanupState(state);
         }
         ACTIVE.clear();

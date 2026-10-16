@@ -23,6 +23,28 @@ public final class BossEncounterEvents {
     @FunctionalInterface public interface Phase { void onEvent(BossEncounterSnapshot encounter, String previous, String current); }
     @FunctionalInterface public interface Hit { void onEvent(BossEncounterSnapshot encounter, Identifier action, UUID target, float damage); }
     @FunctionalInterface public interface End { void onEvent(BossEncounterSnapshot encounter, BossAction.StopReason reason); }
+    @FunctionalInterface public interface Terminal { void onEvent(BossTerminalSnapshot snapshot); }
+    @FunctionalInterface public interface Vitals { void onEvent(BossVitalsChange change); }
+    @FunctionalInterface public interface Cleanup { void onEvent(BossCleanupSnapshot snapshot); }
+    private static volatile boolean terminalListeners, vitalsListeners, cleanupListeners;
+    public static boolean hasTerminalListeners() { return terminalListeners; }
+    public static boolean hasVitalsListeners() { return vitalsListeners; }
+    public static boolean hasCleanupListeners() { return cleanupListeners; }
+    /** Once-only pre-restoration capture. An observer cannot veto encounter end. */
+    public static final Event<Terminal> TERMINAL = EventFactory.createArrayBacked(Terminal.class, listeners -> {
+        terminalListeners = listeners.length != 0;
+        return snapshot -> { for (var listener : listeners) safely(() -> listener.onEvent(snapshot)); };
+    });
+    /** Actual native writes; see BossVitalsChange for nesting and attribution. */
+    public static final Event<Vitals> VITALS_CHANGED = EventFactory.createArrayBacked(Vitals.class, listeners -> {
+        vitalsListeners = listeners.length != 0;
+        return change -> { for (var listener : listeners) safely(() -> listener.onEvent(change)); };
+    });
+    /** Diagnostic state after the legacy end path; no state is changed by capture. */
+    public static final Event<Cleanup> CLEANUP_FINISHED = EventFactory.createArrayBacked(Cleanup.class, listeners -> {
+        cleanupListeners = listeners.length != 0;
+        return snapshot -> { for (var listener : listeners) safely(() -> listener.onEvent(snapshot)); };
+    });
     public static final Event<Encounter> STARTED = EventFactory.createArrayBacked(Encounter.class,
             listeners -> encounter -> { for (var listener : listeners) safely(() -> listener.onEvent(encounter)); });
     public static final Event<Membership> PLAYER_JOINED = EventFactory.createArrayBacked(Membership.class,

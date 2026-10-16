@@ -8,5 +8,6 @@
     "client": ["clockwork.bosses.ClockworkBossClientChecks"],
     "fabric-client-gametest": ["clockwork.bosses.ClockworkBossLootClientGameTest"]
   },
+  "mixins": ["clockwork_bosses.burrow_client_tests.mixins.json"],
   "depends": {"clockwork_bosses": "*"}
 }

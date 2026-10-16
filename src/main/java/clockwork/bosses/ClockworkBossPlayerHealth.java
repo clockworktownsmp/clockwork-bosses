@@ -125,6 +125,37 @@ public final class ClockworkBossPlayerHealth {
         if (member == null) return;
         member.bosses.clear(); member.revision++; reconcile(member, false);
     }
+    /** Event-boundary diagnostics only. Copy native math to a scratch attribute;
+     * never dirty the live attribute, reconcile a grant or heal from a query. */
+    static clockwork.bosses.api.BossSupportSnapshot.Health snapshot(ServerPlayer player, UUID endingBoss) {
+        var live = player.getAttribute(Attributes.MAX_HEALTH);
+        if (live == null) throw new IllegalStateException("Player has no native max-health attribute");
+        Member member = PLAYERS.get(player.getUUID());
+        if (member != null && member.player != player) member = null;
+        var owners = member == null ? java.util.Set.<UUID>of() : java.util.Set.copyOf(member.bosses.keySet());
+        var modifiers = live.getModifiers().stream().map(modifier ->
+                new clockwork.bosses.api.BossSupportSnapshot.Modifier(modifier.id().toString(), modifier.amount(), modifier.operation().name())).toList();
+        var scratch = new AttributeInstance(live.getAttribute(), ignored -> {});
+        scratch.replaceFrom(live); scratch.removeModifier(GRANT);
+        double baseline = Math.max(1, scratch.getValue());
+        double floor = 0;
+        if (member != null) for (var request : member.bosses.entrySet())
+            if (!request.getKey().equals(endingBoss)) floor = Math.max(floor, request.getValue().minimumMaxHealth());
+        if (floor > baseline) scratch.addOrReplacePermanentModifier(new AttributeModifier(GRANT,
+                floor / baseline - 1, AttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+        boolean releases = owners.contains(endingBoss);
+        // LivingEntity.getMaxHealth narrows the attribute double to float before
+        // reconcile uses it. Predictions must use that same native precision.
+        double predictedMax = releases ? (float) scratch.getValue() : player.getMaxHealth();
+        double predictedHp = player.getHealth();
+        if (releases && player.isAlive() && Double.compare(member.lastMax, predictedMax) != 0)
+            predictedHp = (float) (Math.clamp(player.getHealth() / Math.max(1, member.lastMax), 0, 1) * predictedMax);
+        return new clockwork.bosses.api.BossSupportSnapshot.Health(owners, live.getBaseValue(), baseline,
+                predictedMax, predictedHp, live.hasModifier(GRANT), modifiers);
+    }
+    static void collectPlayers(UUID boss, Map<UUID, ServerPlayer> players) {
+        for (var member : PLAYERS.values()) if (member.bosses.containsKey(boss)) players.putIfAbsent(member.player.getUUID(), member.player);
+    }
     private static void clearSavedGrant(ServerPlayer player) {
         var attribute = player.getAttribute(Attributes.MAX_HEALTH);
         if (attribute == null || !attribute.hasModifier(GRANT)) return;

@@ -5,15 +5,21 @@
   "name": "Clockwork Bosses local combat regression tests",
   "environment": "server",
   "entrypoints": {
+    "clockwork_bosses": ["clockwork.bosses.ClockworkBossBurrowImpactGameTests"],
+    "main": ["clockwork.bosses.ClockworkBossApiTestLifecycle"],
     "fabric-gametest": [
       "clockwork.bosses.ClockworkBossCombatGameTests",
+      "clockwork.bosses.ClockworkBossBurrowVisibilityGameTests",
+      "clockwork.bosses.ClockworkBossBurrowImpactGameTests",
+      "clockwork.bosses.ClockworkBossApiGameTests",
       "clockwork.bosses.ClockworkBossDarknessGameTests",
       "clockwork.bosses.ClockworkBossPvpGameTests",
+      "clockwork.bosses.ClockworkBossFaceGameTests",
       "clockwork.bosses.ClockworkBossLootGameTests",
       "clockwork.web.WorkshopGameTests"
     ]
   },
-  "mixins": ["clockwork_bosses.pvp_tests.mixins.json"],
+  "mixins": ["clockwork_bosses.pvp_tests.mixins.json", "clockwork_bosses.api_tests.mixins.json", "clockwork_bosses.burrow_tests.mixins.json"],
   "depends": {
     "clockwork_bosses": "*",
     "fabric-gametest-api-v1": "*"

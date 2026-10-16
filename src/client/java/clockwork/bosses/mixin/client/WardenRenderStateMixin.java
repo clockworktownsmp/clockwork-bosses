@@ -9,6 +9,9 @@ import org.spongepowered.asm.mixin.Unique;
 /** Adds Clockwork Boss visual state to the client render snapshot. */
 @Mixin(WardenRenderState.class)
 public abstract class WardenRenderStateMixin implements WardenRenderStateVisuals {
+    @Unique private long clockworkBosses$burrowEmergenceMillis = -1;
+    @Override public long clockworkBosses$getBurrowEmergenceMillis() { return clockworkBosses$burrowEmergenceMillis; }
+    @Override public void clockworkBosses$setBurrowEmergenceMillis(long millis) { clockworkBosses$burrowEmergenceMillis = millis; }
     @Unique private long clockworkBosses$meleeMillis = -1;
     @Override public long clockworkBosses$getMeleeMillis() { return clockworkBosses$meleeMillis; }
     @Override public void clockworkBosses$setMeleeMillis(long millis) { clockworkBosses$meleeMillis = millis; }

@@ -1396,6 +1396,11 @@ public class ClockworkBossCombatGameTests {
     /** PvP fixtures explicitly opt in; unrelated combat/support tests retain
      * their prior rules even if another fixture has a nearby active arena. */
     static Warden boss(GameTestHelper helper, JsonObject config, String suffix, boolean playerSupport, boolean pvp) throws Exception {
+        return boss(helper, config, suffix, playerSupport, pvp, helper.absoluteVec(new Vec3(2, 2, 2)));
+    }
+    /** A shutdown fixture can spawn directly in its already entity-ticking
+     * owned chunk, avoiding an unload during a cross-chunk relocation. */
+    static Warden boss(GameTestHelper helper, JsonObject config, String suffix, boolean playerSupport, boolean pvp, Vec3 position) throws Exception {
         config.getAsJsonObject("boss_bar").getAsJsonObject("pvp_protection").addProperty("enabled", pvp);
         // Existing combat fixtures opt out so arena overlap cannot grant their
         // mock players health/healing intended only for the support fixture.
@@ -1410,7 +1415,7 @@ public class ClockworkBossCombatGameTests {
         String template = "regression_" + suffix;
         String name = "regression_" + UUID.randomUUID();
         ClockworkBossTemplateStore.save(template, config);
-        helper.assertTrue(ClockworkBossManager.spawn(source(helper), template, name) == 1, "production spawn succeeds");
+        helper.assertTrue(ClockworkBossManager.spawn(source(helper).withPosition(position), template, name) == 1, "production spawn succeeds");
         for (var entity : helper.getLevel().getAllEntities()) {
             if (entity instanceof Warden warden && ((ClockworkBossMarker) warden).clockworkBosses$getName().equals(name)) {
                 var marker = (ClockworkBossMarker) warden;
@@ -1423,7 +1428,7 @@ public class ClockworkBossCombatGameTests {
                 // Tests drive attacks explicitly; native pathfinding/other mobs
                 // must not introduce a second hit between scheduled assertions.
                 warden.removeFreeWill();
-                warden.snapTo(helper.absoluteVec(new Vec3(2, 2, 2)));
+                warden.snapTo(position);
                 ClockworkBossManager.prepareCombatPhase(warden);
                 return warden;
             }

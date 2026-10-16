@@ -128,7 +128,7 @@ public final class ClockworkBossFightPotion {
         ((ClockworkBossPlayerData) player).clockworkBosses$setPotionReadyTick(time > Long.MAX_VALUE - policy.cooldownTicks()
                 ? Long.MAX_VALUE : time + policy.cooldownTicks());
         player.getCooldowns().addCooldown(GROUP, policy.cooldownTicks());
-        player.heal(policy.healHp());
+        try (var observation = ClockworkBossVitals.potion(player)) { player.heal(policy.healHp()); }
         var food = player.getFoodData();
         food.setFoodLevel(Math.min(20, food.getFoodLevel() + policy.hunger()));
         food.setSaturation(Math.min(food.getFoodLevel(), food.getSaturationLevel() + policy.saturation()));
@@ -258,5 +258,19 @@ public final class ClockworkBossFightPotion {
     private static void sync(ServerPlayer player) {
         player.inventoryMenu.broadcastChanges();
         if (player.containerMenu != player.inventoryMenu) player.containerMenu.broadcastChanges();
+    }
+    static void collectPlayers(UUID boss, Map<UUID, ServerPlayer> players) {
+        for (var member : PLAYERS.values()) if (member.bosses.containsKey(boss)) players.putIfAbsent(member.player.getUUID(), member.player);
+    }
+    static clockwork.bosses.api.BossSupportSnapshot.Potion snapshot(ServerPlayer player) {
+        var member = PLAYERS.get(player.getUUID());
+        var owners = member == null || member.player != player ? java.util.Set.<UUID>of() : java.util.Set.copyOf(member.bosses.keySet());
+        int bottles = 0;
+        var inventory = player.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++)
+            if (isPotion(inventory.getItem(slot))) bottles += inventory.getItem(slot).getCount();
+        if (isPotion(player.containerMenu.getCarried())) bottles += player.containerMenu.getCarried().getCount();
+        return new clockwork.bosses.api.BossSupportSnapshot.Potion(owners, bottles, isPotion(player.getUseItem()),
+                ((ClockworkBossPlayerData) player).clockworkBosses$potionReadyTick());
     }
 }
