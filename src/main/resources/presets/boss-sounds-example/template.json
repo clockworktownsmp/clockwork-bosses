@@ -200,6 +200,7 @@
   // or another Minecraft category. Master still affects every channel. GUI changes and /stopsound use
   // this category.
   "music": {
+    "source": "template",
     "enabled": true,
     "file": "",
     "volume": 0.75,

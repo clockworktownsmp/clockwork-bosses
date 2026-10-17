@@ -37,6 +37,9 @@ public final class ClockworkBossEditorSchema {
             copy.add("phases", phases);
         }
         merge(copy, DEFAULTS, "");
+        var musicSource = get(stored, "music.source");
+        if (musicSource == null || musicSource.isJsonNull())
+            putCreating(copy, "music.source", new JsonPrimitive("template"));
         // New files explicitly select Auto (0). Missing/null base ranges in
         // older files mean 32 blocks; display that without changing stored data.
         for (String path : ClockworkBossSoundDistance.BASE_RANGE_PATHS) {
@@ -276,9 +279,11 @@ public final class ClockworkBossEditorSchema {
             case "boss_bar.overlay" -> List.of("PROGRESS", "NOTCHED_6", "NOTCHED_10", "NOTCHED_12", "NOTCHED_20");
             case "targeting.mode" -> List.of("nearest", "random", "farthest");
             case "music.channel" -> ClockworkBossMusicChannels.NAMES;
+            case "music.source" -> List.of("template", "library");
             default -> List.of();
         };
         if (key.equals("subphase_order")) choices = List.of("sequential", "random");
+        if (base.equals("music.source")) nullable = true;
         if (path.matches("phases\\.[^.]+\\.subphases\\.[^.]+\\.type")) choices = List.of("attack", "recovery");
         if (base.equals("loot.source")) choices = List.of("entries", "table");
         if (reward && key.equals("type")) choices = List.of("item");
@@ -465,7 +470,7 @@ public final class ClockworkBossEditorSchema {
     }
 
     private static void compare(JsonElement expected, JsonElement candidate, String path, int depth, int[] count, JsonObject document) {
-        if (path.equals(ClockworkBossActionEditor.CATALOG)) {
+        if (path.equals(ClockworkBossActionEditor.CATALOG) || path.equals("_documentation")) {
             if (!expected.equals(candidate)) throw new IllegalArgumentException("Action catalog is read-only");
             return;
         }

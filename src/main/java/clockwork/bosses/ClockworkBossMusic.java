@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -31,7 +32,11 @@ public final class ClockworkBossMusic {
     private ClockworkBossMusic() {}
 
     /** Compiled once per template load/reload; blank files make music entirely inactive. */
-    public record Settings(boolean enabled, String file, float volume, boolean loop, float fadeSeconds, net.minecraft.sounds.SoundSource channel) {
+    public record Settings(boolean enabled, String source, String file, float volume, boolean loop, float fadeSeconds, net.minecraft.sounds.SoundSource channel) {
+        /** Preserve the existing source-level constructor for template music. */
+        public Settings(boolean enabled, String file, float volume, boolean loop, float fadeSeconds, net.minecraft.sounds.SoundSource channel) {
+            this(enabled, "template", file, volume, loop, fadeSeconds, channel);
+        }
         public static Settings read(JsonObject config) {
             JsonObject music = config.has("music") && config.get("music").isJsonObject()
                     ? config.getAsJsonObject("music") : new JsonObject();
@@ -41,8 +46,16 @@ public final class ClockworkBossMusic {
             String channel;
             try { channel = music.has("channel") ? music.get("channel").getAsString() : "music"; }
             catch (RuntimeException invalid) { channel = "music"; }
+            String source = "template";
+            if (music.has("source") && !music.get("source").isJsonNull()) {
+                var value = music.get("source");
+                if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()
+                        || !List.of("template", "library").contains(value.getAsString()))
+                    throw new IllegalArgumentException("music.source must be template or library");
+                source = value.getAsString();
+            }
             return new Settings(flag(music, "enabled", true) && ClockworkBossSoundPayload.isValidFileName(file),
-                    file, bounded(music, "volume", 0.75F, 0, 4), flag(music, "loop", true),
+                    source, file, bounded(music, "volume", 0.75F, 0, 4), flag(music, "loop", true),
                     bounded(music, "fade_out_seconds", 2, 0, 10), ClockworkBossMusicChannels.orDefault(channel));
         }
         private static boolean flag(JsonObject object, String key, boolean fallback) {
@@ -61,6 +74,15 @@ public final class ClockworkBossMusic {
     public static void register() {
         PayloadTypeRegistry.clientboundPlay().register(ClockworkBossMusicControl.TYPE, ClockworkBossMusicControl.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(ClockworkBossMusicData.TYPE, ClockworkBossMusicData.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(ClockworkBossLibraryMusicData.TYPE, ClockworkBossLibraryMusicData.CODEC);
+        ServerLifecycleEvents.SERVER_STARTING.register(server -> {
+            boolean admitted = ClockworkBossTemplateTasks.submit(server, () -> ClockworkBossTemplateStore.musicLibrary().seedBundled(),
+                    (created, failure) -> {
+                        if (failure != null) org.slf4j.LoggerFactory.getLogger(ClockworkBosses.MOD_ID)
+                                .warn("Shared music seeding failed: {}", ClockworkBossTemplateTasks.reason(failure));
+                    });
+            if (!admitted) org.slf4j.LoggerFactory.getLogger(ClockworkBosses.MOD_ID).warn("Shared music seeding file worker unavailable");
+        });
         ServerPlayerEvents.LEAVE.register(player -> { leave(player); SENT.remove(player.getUUID()); });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> { ENCOUNTERS.clear(); SENT.clear(); FILES.clear(); });
     }
@@ -84,13 +106,12 @@ public final class ClockworkBossMusic {
         }
         Encounter current = encounter;
         for (UUID id : Set.copyOf(current.listeners.keySet())) {
-            if (!viewers.contains(id)) stop(current, id, level.getServer());
+            ServerPlayer player = level.getServer().getPlayerList().getPlayer(id);
+            if (!viewers.contains(id) || !supportsSource(player, settings.source())) stop(current, id, level.getServer());
         }
         for (UUID id : viewers) {
             ServerPlayer player = level.getServer().getPlayerList().getPlayer(id);
-            if (player == null || player.hasDisconnected() || !ServerPlayNetworking.canSend(player, ClockworkBossMusicControl.TYPE)
-                    || !ServerPlayNetworking.canSend(player, ClockworkBossMusicData.TYPE)
-                    || !ServerPlayNetworking.canSend(player, ClockworkBossMediaChunk.TYPE)) continue;
+            if (!supportsSource(player, settings.source())) continue;
             if (!current.listeners.containsKey(id)) current.listeners.put(id, new Listener());
         }
         if (current.listeners.isEmpty()) {
@@ -100,8 +121,8 @@ public final class ClockworkBossMusic {
         if (!current.requested && current.listeners.values().stream().anyMatch(listener -> !listener.started)) {
             current.requested = true;
             long generation = FILES.generation();
-            String fileKey = current.template + ":" + settings.file();
-            var request = FILES.request(fileKey, () -> load(current.template, settings.file()));
+            String fileKey = cacheKey(current.template, settings);
+            var request = FILES.request(fileKey, () -> load(current.template, settings));
             if (request == null) {
                 // A full queue is transient; the existing arena scan can retry.
                 // A rejected file stays suppressed until reload, without disk/log churn.
@@ -125,26 +146,35 @@ public final class ClockworkBossMusic {
         }
     }
 
+    /** Capability state can change while the off-thread file read is pending.
+     * Check at delivery as well as admission, before sending any start control. */
+    static boolean supportsSource(ServerPlayer player, String source) {
+        return player != null && !player.hasDisconnected() && ServerPlayNetworking.canSend(player, ClockworkBossMusicControl.TYPE)
+                && ServerPlayNetworking.canSend(player, source.equals("library") ? ClockworkBossLibraryMusicData.TYPE : ClockworkBossMusicData.TYPE)
+                && ServerPlayNetworking.canSend(player, ClockworkBossMediaChunk.TYPE);
+    }
     /** Start control precedes data. A stop arriving during transfer removes its matching client token. */
     private static void send(Encounter encounter, ServerPlayer player, Asset asset) {
         Listener listener = encounter.listeners.get(player.getUUID());
+        if (listener == null) return;
+        if (!supportsSource(player, encounter.settings.source())) { stop(encounter, player.getUUID(), encounter.server); return; }
         UUID token = listener.token;
         listener.started = true;
-        String key = asset.data.key();
+        String key = asset.key;
         ServerPlayNetworking.send(player, new ClockworkBossMusicControl(encounter.boss, token, true, key,
                 encounter.settings.volume(), encounter.settings.loop(), encounter.settings.fadeSeconds(), encounter.settings.channel()));
         if (sent(player.getUUID(), key)) {
-            ServerPlayNetworking.send(player, asset.data.cached());
+            ServerPlayNetworking.send(player, asset.cached);
             remember(player.getUUID(), key);
         } else {
             boolean queued = ClockworkBossMediaTransfers.send(player, "music:" + encounter.boss, asset.prepared,
                     () -> remember(player.getUUID(), key), () -> {
-                        if (!sent(player.getUUID(), key)) return false;
-                        ServerPlayNetworking.send(player, asset.data.cached());
+                        if (!supportsSource(player, encounter.settings.source()) || !sent(player.getUUID(), key)) return false;
+                        ServerPlayNetworking.send(player, asset.cached);
                         remember(player.getUUID(), key);
                         return true;
                     }, () -> ENCOUNTERS.get(encounter.boss) == encounter
-                            && encounter.listeners.get(player.getUUID()) == listener && !player.hasDisconnected());
+                            && encounter.listeners.get(player.getUUID()) == listener && supportsSource(player, encounter.settings.source()));
             if (!queued) {
                 // Do not leave an undelivered track permanently marked started.
                 // Cancel the control already sent (which must precede file bytes),
@@ -197,8 +227,18 @@ public final class ClockworkBossMusic {
         while (cache.size() > 4) cache.remove(cache.keySet().iterator().next());
     }
 
-    /** Only a regular direct sounds/ file may load; content, CRC/header limits, bytes and duration are checked off-thread. */
-    private static Asset load(String template, String file) throws Exception {
+    /** Explicit source identity shares library snapshots across templates; publication epochs refresh future requests. */
+    static String cacheKey(String template, Settings settings) {
+        return settings.source().equals("library") ? "library:" + settings.file() + ":" + clockwork.web.SharedMusicLibrary.publicationEpoch()
+                : "template:" + template + ":" + settings.file();
+    }
+    private static Asset load(String template, Settings settings) throws Exception {
+        String file = settings.file();
+        if (settings.source().equals("library")) {
+            byte[] bytes = ClockworkBossTemplateStore.musicLibrary().readValidated(file);
+            String revision = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+            return new Asset(new ClockworkBossLibraryMusicData(file, revision, bytes));
+        }
         var directory = ClockworkBossTemplateStore.mediaDirectory(template, "sounds").toRealPath();
         var requested = directory.resolve(file);
         ClockworkBossTemplateStore.checkOwnedPath(requested);
@@ -218,10 +258,16 @@ public final class ClockworkBossMusic {
         return new Asset(new ClockworkBossMusicData(template, file, revision, bytes));
     }
     private static final class Asset {
-        final ClockworkBossMusicData data;
+        final String key;
+        final net.minecraft.network.protocol.common.custom.CustomPacketPayload cached;
         final ClockworkBossMediaTransfers.Prepared prepared;
         Asset(ClockworkBossMusicData data) {
-            this.data = data;
+            this(data, data.cached(), data.key());
+        }
+        Asset(ClockworkBossLibraryMusicData data) { this(data, data.cached(), data.key()); }
+        private Asset(net.minecraft.network.protocol.common.custom.CustomPacketPayload data,
+                      net.minecraft.network.protocol.common.custom.CustomPacketPayload cached, String key) {
+            this.key = key; this.cached = cached;
             // This codec contains no registry references. Encode once on the I/O
             // worker, keeping an eight-megabyte copy off the server tick thread.
             this.prepared = ClockworkBossMediaTransfers.prepare(data, net.minecraft.core.RegistryAccess.EMPTY);

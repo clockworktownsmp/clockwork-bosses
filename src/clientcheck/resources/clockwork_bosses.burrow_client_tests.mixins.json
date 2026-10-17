@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "clockwork.bosses.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "LibraryMusicReceiptProbe"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

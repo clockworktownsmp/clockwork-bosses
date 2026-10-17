@@ -57,7 +57,7 @@ public final class TemplateApi {
             if (suppliedOrigin != null && !suppliedOrigin.equals(origin)) { json(exchange, 403, error("Unexpected origin")); return; }
             boolean changing = method.equals("POST") || method.equals("PUT");
             if (changing && !origin.equals(suppliedOrigin)) { json(exchange, 403, error("Same-origin request required")); return; }
-            if (path.equals("/api/status") && method.equals("GET")) { var result = object("enabled", true); result.addProperty("preset_media", true); result.addProperty("draft_media", true); result.addProperty("media_sources", true); result.addProperty("item_catalog", items != null); result.add("sound_uploads", AudioUploadService.capabilities()); json(exchange, 200, result); return; }
+            if (path.equals("/api/status") && method.equals("GET")) { var result = object("enabled", true); result.addProperty("preset_media", true); result.addProperty("draft_media", true); result.addProperty("media_sources", true); result.addProperty("item_catalog", items != null); result.add("sound_uploads", AudioUploadService.capabilities()); result.add("shared_music_library", SharedMusicLibrary.capabilities()); json(exchange, 200, result); return; }
             if (path.equals("/api/login") && method.equals("POST")) {
                 if (!access.permit("login", 20)) { json(exchange, 429, error("Too many login attempts; retry in a minute")); return; }
                 JsonObject body = TemplateJson.parse(body(exchange, 1024));
@@ -86,6 +86,37 @@ public final class TemplateApi {
                 json(exchange, 200, items.page(path)); return;
             }
             String[] parts = path.split("/", -1);
+            if (path.equals("/api/music-library") && method.equals("GET")) {
+                JsonObject result = files.musicLibrary().listing();
+                if (access.recheck(token, session) == null) throw new Denied();
+                json(exchange, 200, result); return;
+            }
+            if (parts.length == 5 && parts[1].equals("api") && parts[2].equals("music-library")
+                    && parts[3].equals("audio") && (method.equals("GET") || method.equals("HEAD"))) {
+                byte[] bytes;
+                try { bytes = files.musicLibrary().readValidated(parts[4]); }
+                catch (java.nio.file.NoSuchFileException missing) { json(exchange, 404, error("Shared music is missing from this server; no template-local fallback is used")); return; }
+                if (access.recheck(token, session) == null) throw new Denied();
+                exchange.getResponseHeaders().set("Content-Disposition", "inline; filename=\"" + parts[4] + "\"");
+                exchange.getResponseHeaders().set("Accept-Ranges", "none");
+                exchange.getResponseHeaders().set("ETag", quote(AccessSessions.digest(bytes)));
+                respond(exchange, 200, bytes, "audio/ogg"); return;
+            }
+            if (parts.length == 4 && parts[1].equals("api") && parts[2].equals("music-library") && method.equals("PUT")) {
+                String expected = revision(exchange), track = singleHeader(exchange, "X-Music-Revision"), impact = singleHeader(exchange, "X-Music-Impact");
+                if (!access.permit("sound-upload", 12)) { exchange.getResponseHeaders().set("Retry-After", "60"); json(exchange, 429, error("Sound upload limit reached (12 per minute)")); return; }
+                JsonObject result = uploads.uploadLibrary(exchange, files.musicLibrary(), parts[3], expected, track, impact,
+                        "1".equals(singleHeader(exchange, "X-Music-Overwrite")), () -> { if (access.recheck(token, session) == null) throw new Denied(); });
+                audit(session, "upload-shared-music", parts[3], result.get("track_revision").getAsString());
+                json(exchange, 200, result); return;
+            }
+            if (parts.length == 5 && parts[1].equals("api") && parts[2].equals("music-library") && parts[4].equals("delete") && method.equals("POST")) {
+                body(exchange, 1024);
+                JsonObject result = files.musicLibrary().delete(parts[3], revision(exchange), singleHeader(exchange, "X-Music-Revision"),
+                        singleHeader(exchange, "X-Music-Impact"), () -> { if (access.recheck(token, session) == null) throw new Denied(); });
+                audit(session, "delete-shared-music", parts[3], result.get("backed_up_revision").getAsString());
+                json(exchange, 200, result); return;
+            }
             if (parts.length == 4 && parts[1].equals("api") && parts[2].equals("draft-audio") && method.equals("GET")) {
                 var listing = files.uploadListing(parts[3]);
                 if (access.recheck(token, session) == null) throw new Denied();

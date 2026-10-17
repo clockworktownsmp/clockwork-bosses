@@ -31,6 +31,8 @@ public class ClockworkBossesClient implements ClientModInitializer {
                 (payload, context) -> ClockworkBossMusicClient.control(payload));
         ClientPlayNetworking.registerGlobalReceiver(ClockworkBossMusicData.TYPE,
                 (payload, context) -> ClockworkBossMusicClient.accept(payload));
+        ClientPlayNetworking.registerGlobalReceiver(clockwork.bosses.ClockworkBossLibraryMusicData.TYPE,
+                (payload, context) -> ClockworkBossMusicClient.accept(payload));
         ClientPlayNetworking.registerGlobalReceiver(ClockworkBossMediaChunk.TYPE,
                 (payload, context) -> ClockworkBossMediaClient.accept(payload, context.client()));
 

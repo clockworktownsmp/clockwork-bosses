@@ -9,7 +9,8 @@
       "clockwork.bosses.ClockworkBossCombatGameTests",
       "clockwork.bosses.ClockworkBossBurrowVisibilityGameTests",
       "clockwork.bosses.ClockworkBossLootGameTests",
-      "clockwork.web.WorkshopGameTests"
+      "clockwork.web.WorkshopGameTests",
+      "clockwork.bosses.ClockworkBossLibraryMusicGameTests"
     ]
   },
   "depends": {

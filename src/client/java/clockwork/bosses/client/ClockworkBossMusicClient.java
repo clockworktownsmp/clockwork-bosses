@@ -64,10 +64,14 @@ public final class ClockworkBossMusicClient {
 
     /** Keep bounded compressed bytes; integrity/container validation happens off the render thread before decoding. */
     public static void accept(ClockworkBossMusicData message) {
-        String key = message.key();
-        byte[] bytes = message.bytes();
+        accept(message.key(), message.revision(), message.bytes());
+    }
+    public static void accept(clockwork.bosses.ClockworkBossLibraryMusicData message) {
+        accept(message.key(), message.revision(), message.bytes());
+    }
+    private static void accept(String key, String revision, byte[] bytes) {
         File file = FILES.remove(key);
-        if (bytes.length > 0) file = new File(bytes, message.revision());
+        if (bytes.length > 0) file = new File(bytes, revision);
         if (file != null) FILES.put(key, file);
         while (FILES.size() > 4) FILES.remove(FILES.keySet().iterator().next());
     }

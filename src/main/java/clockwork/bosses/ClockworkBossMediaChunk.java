@@ -13,6 +13,8 @@ public record ClockworkBossMediaChunk(UUID transfer, int kind, int offset, int t
     public static final int SKIN = 0;
     public static final int SOUND = 1;
     public static final int MUSIC = 2;
+    // Only peers advertising library_music_data_v1 receive this new kind.
+    public static final int LIBRARY_MUSIC = 3;
     public static final int CHUNK_BYTES = 16 * 1024;
     // Includes the original validated payload's metadata, not just its file bytes.
     public static final int MAX_TRANSFER_BYTES = 1024 * 1024;
@@ -30,7 +32,7 @@ public record ClockworkBossMediaChunk(UUID transfer, int kind, int offset, int t
                     buffer.readVarInt(), buffer.readVarInt(), buffer.readByteArray(CHUNK_BYTES)));
 
     public ClockworkBossMediaChunk {
-        if (transfer == null || (kind != SKIN && kind != SOUND && kind != MUSIC) || bytes == null
+        if (transfer == null || (kind != SKIN && kind != SOUND && kind != MUSIC && kind != LIBRARY_MUSIC) || bytes == null
                 || bytes.length == 0 || bytes.length > CHUNK_BYTES || total <= 0
                 || total > limit(kind) || offset < 0 || offset > total - bytes.length) {
             throw new IllegalArgumentException("Invalid Clockwork Boss media chunk");
@@ -40,6 +42,6 @@ public record ClockworkBossMediaChunk(UUID transfer, int kind, int offset, int t
 
     @Override public byte[] bytes() { return bytes.clone(); }
     /** Larger assemblies are reserved for streaming music; skin/effect bounds remain unchanged. */
-    public static int limit(int kind) { return kind == MUSIC ? MAX_MUSIC_TRANSFER_BYTES : MAX_TRANSFER_BYTES; }
+    public static int limit(int kind) { return kind == MUSIC || kind == LIBRARY_MUSIC ? MAX_MUSIC_TRANSFER_BYTES : MAX_TRANSFER_BYTES; }
     @Override public Type<ClockworkBossMediaChunk> type() { return TYPE; }
 }

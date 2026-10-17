@@ -264,7 +264,7 @@ public final class ClockworkBossTemplateScreen extends Screen {
             }
             if (root.equals("boss_bar") && draft.getAsJsonObject(root).has("area_effects")) sections.add(new Section("boss_bar.area_effects", "Arena effects"));
         }
-        Set<String> grouped = Set.of("skin", "attacks", "targeting", "warden_effects", "music", "voice_lines", clockwork.bosses.ClockworkBossActionEditor.CATALOG);
+        Set<String> grouped = Set.of("skin", "attacks", "targeting", "warden_effects", "music", "voice_lines", "_documentation", clockwork.bosses.ClockworkBossActionEditor.CATALOG);
         for (var entry : draft.entrySet()) if (entry.getValue().isJsonObject() && !grouped.contains(entry.getKey()) && sections.stream().noneMatch(section -> section.path.equals(entry.getKey()))) sections.add(new Section(entry.getKey(), label(entry.getKey())));
         if (sections.stream().noneMatch(section -> section.path.equals(selected))) selected = "phases";
     }
@@ -421,7 +421,7 @@ public final class ClockworkBossTemplateScreen extends Screen {
     }
     private void fieldContents(Row row, int y) {
         JsonElement value = ClockworkBossEditorSchema.get(draft, row.path);
-        var field = ClockworkBossEditorSchema.field(row.path, value, draft);
+        var field = musicField(row.path, ClockworkBossEditorSchema.field(row.path, value, draft));
         String text = inputs.getOrDefault(row.path, displayValue(row.path, value));
         boolean narrow = contentWidth < 300;
         int labelWidth = narrow ? contentWidth : Math.max(120, contentWidth / 2 - 12);
@@ -1205,8 +1205,49 @@ public final class ClockworkBossTemplateScreen extends Screen {
             default -> label(value);
         };
     }
-    /** Short inline help complements the longer tooltip; ticks and amplifier semantics stay explicit. */
-    private static String darknessNote(String path) {
+    // Music choices and diagnostics share the existing compact row-help layout.
+    /** The server supplies filename metadata, never a client directory. Library
+     * choices cannot be shadowed by a same-named template file or local preview. */
+    private ClockworkBossEditorSchema.Field musicField(String path, ClockworkBossEditorSchema.Field field) {
+        if (!path.equals("music.file") || !musicValue("source", "template").equals("library")) return field;
+        List<String> options = new ArrayList<>(); options.add("");
+        JsonElement metadata = musicCatalog();
+        if (metadata != null && metadata.isJsonObject() && metadata.getAsJsonObject().has("tracks")) {
+            for (JsonElement entry : metadata.getAsJsonObject().getAsJsonArray("tracks")) {
+                JsonObject track = entry.getAsJsonObject();
+                if (track.get("available").getAsBoolean()) options.add(track.get("filename").getAsString());
+            }
+        }
+        String current = musicValue("file", ""); if (!options.contains(current)) options.add(current);
+        return new ClockworkBossEditorSchema.Field(field.kind(), options, field.nullable(), field.integer(), field.min(), field.max(),
+                "Shared OGG files in config/clockwork-bosses/music on the server. Choose one library filename; template sounds folders are a separate source.");
+    }
+    private String musicValue(String key, String fallback) {
+        String entered = inputs.get("music." + key);
+        if (entered != null) return entered.equals("<inherit>") ? fallback : entered;
+        JsonElement value = ClockworkBossEditorSchema.get(draft, "music." + key);
+        return value == null || value.isJsonNull() ? fallback : value.getAsString();
+    }
+    private JsonElement musicCatalog() {
+        JsonElement hints = draft.get("_documentation");
+        return hints != null && hints.isJsonObject() ? hints.getAsJsonObject().get("music_library") : null;
+    }
+    private String musicNote() {
+        if (!musicValue("source", "template").equals("library")) return "Template sounds folder; no library fallback.";
+        JsonElement metadata = musicCatalog();
+        if (metadata == null || !metadata.isJsonObject()) return "Shared library unavailable; reopen on a supporting server.";
+        JsonObject catalog = metadata.getAsJsonObject();
+        if (catalog.has("error")) return "Library unavailable: " + catalog.get("error").getAsString();
+        String file = musicValue("file", ""); if (file.isEmpty()) return "Choose a shared OGG; blank disables playback.";
+        if (catalog.has("tracks")) for (JsonElement entry : catalog.getAsJsonArray("tracks")) {
+            JsonObject track = entry.getAsJsonObject();
+            if (track.get("filename").getAsString().equals(file))
+                return track.get("available").getAsBoolean() ? "Shared library: " + file : "Invalid shared OGG: " + file;
+        }
+        return "Missing shared OGG: " + file + "; no fallback.";
+    }
+    private String darknessNote(String path) {
+        if (path.equals("music.source") || path.equals("music.file")) return musicNote();
         if (!path.startsWith("dormant_darkness.") && !path.contains(".darkness.")) return "";
         return switch (path.substring(path.lastIndexOf('.') + 1)) {
             case "enabled" -> "Enable Darkness.";

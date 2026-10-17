@@ -42,6 +42,12 @@ public final class ClockworkBossTemplateStore {
 
     private ClockworkBossTemplateStore() {}
 
+    /** One fixed library, never a template-local copy. Instances share the
+     * native writer monitor with the optional Workshop server module. */
+    private static final clockwork.web.SharedMusicLibrary MUSIC_LIBRARY =
+            new clockwork.web.SharedMusicLibrary(CONFIG_ROOT.getParent(), ClockworkBossTemplateStore.class);
+    public static clockwork.web.SharedMusicLibrary musicLibrary() { return MUSIC_LIBRARY; }
+
     /** Creates only the active template root; individual templates own their media folders. */
     public static void ensureDirectory() throws Exception {
         createOwnedDirectory(DIRECTORY);
@@ -220,7 +226,14 @@ public final class ClockworkBossTemplateStore {
         byte[] bytes = readDocumentBytes(path);
         String revision = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
         JsonObject stored = parseDocument(bytes);
-        return new EditorDocument(ClockworkBossEditorSchema.editable(stored), revision, stored);
+        JsonObject editable = ClockworkBossEditorSchema.editable(stored);
+        // Reuse an already reserved envelope. A new root name could overwrite
+        // an older addon's ordinary unknown field merely by opening/saving it.
+        JsonObject hints = new JsonObject();
+        try { hints.add("music_library", MUSIC_LIBRARY.editorCatalog()); }
+        catch (IOException unavailable) { JsonObject catalog = new JsonObject(); catalog.addProperty("error", unavailable.getMessage()); hints.add("music_library", catalog); }
+        editable.add("_documentation", hints);
+        return new EditorDocument(editable, revision, stored);
     }
 
     /** Editor custom preview reads only a validated PNG directly inside the selected file's own skins folder. */
@@ -248,7 +261,8 @@ public final class ClockworkBossTemplateStore {
         JsonObject updated = expected.deepCopy();
         for (var entry : patch.entrySet()) {
             if (ClockworkBossEditorSchema.orderField(entry.getKey())) continue;
-            if (entry.getKey().equals(ClockworkBossActionEditor.CATALOG) || entry.getKey().startsWith(ClockworkBossActionEditor.CATALOG + "."))
+            if (entry.getKey().equals("_documentation") || entry.getKey().startsWith("_documentation.")
+                    || entry.getKey().equals(ClockworkBossActionEditor.CATALOG) || entry.getKey().startsWith(ClockworkBossActionEditor.CATALOG + "."))
                 throw new IOException("Action definitions are supplied by the server, not editable fields");
             if (entry.getKey().length() > 256 || ClockworkBossEditorSchema.get(updated, entry.getKey()) == null) throw new IOException("Unknown editor field");
             if (ClockworkBossActionEditor.typePath(entry.getKey())
@@ -261,6 +275,7 @@ public final class ClockworkBossTemplateStore {
         JsonObject persisted = current.stored().deepCopy();
         persisted.remove(ClockworkBossActionEditor.CATALOG);
         persisted.remove(ClockworkBossActionEditor.TYPES);
+        persisted.remove("_documentation");
         if ((!persisted.has("phases") || !persisted.get("phases").isJsonObject())
                 && patch.keySet().stream().anyMatch(key -> key.startsWith("phases.")
                 || ClockworkBossEditorSchema.orderField(key) && !key.equals("_loot_entry_order")))
@@ -270,6 +285,7 @@ public final class ClockworkBossTemplateStore {
         lootCatalog.validate(persisted); // No backup/publication occurs if a reward reference is invalid.
         var compiled = ClockworkBossSettings.read(persisted);
         ClockworkBossSubphases.read(persisted, compiled); // Validate actual child behavior before committing the file.
+        var musicCheck = MUSIC_LIBRARY.referenceCheck(persisted);
         Path path = preset ? PRESET_DIRECTORY.resolve(name).resolve("template.json") : pathFor(name);
         createTemplateFolders(path.getParent());
         // One rolling backup retains the prior file without growing disk use on every GUI save.
@@ -278,6 +294,7 @@ public final class ClockworkBossTemplateStore {
         Files.copy(path, backup, StandardCopyOption.REPLACE_EXISTING);
         // Recheck immediately before publication to catch hosting-panel edits during validation/backup.
         if (!loadForEditor(name, preset).revision().equals(revision)) throw new IOException("This file changed while saving. Reopen the editor.");
+        musicCheck.check();
         writeFile(path, persisted, true);
         refreshCache();
         return loadForEditor(name, preset);

@@ -75,6 +75,7 @@
     }
   },
   "music": {
+    "source": "template",
     "channel": "music",
     "enabled": true,
     "file": "",
@@ -505,7 +506,8 @@
     "skin.glowing_eyes.left_y": "Left eye vertical position, whole number 0-15; default 7. The rendered position is clamped so the scaled eye fits on the face. Larger values move down.",
     "skin.glowing_eyes.right_x": "Right eye horizontal position, whole number 0-15; default 11. The rendered position is clamped so the scaled eye fits on the face.",
     "skin.glowing_eyes.right_y": "Right eye vertical position, whole number 0-15; default 7. The rendered position is clamped so the scaled eye fits on the face.",
-    "music": "Encounter music starts on activation for players in the arena; entrants join and leavers fade out. One track plays per client, with the most recently entered ready encounter taking priority. Put its OGG Vorbis file in this template's sounds folder. Mono or stereo works; the selected native sound channel controls volume. No track is included by default.",
+    "music": "Encounter music starts on activation for players in the arena; entrants join and leavers fade out. One track plays per client, with the most recently entered ready encounter taking priority. Choose template for this template's sounds folder, or library for the server-owned shared music folder. Sources never fall back to one another. Mono or stereo works; the selected native sound channel controls volume. The shared library includes boss1.ogg and boss2.ogg; no filename is selected automatically.",
+    "music.source": "template uses this template's sounds folder; library uses config/clockwork-bosses/music. Missing/null keeps template-local behavior. Library playback requires a client supporting the negotiated library channel. There is no source fallback.",
     "music.channel": "Native sound channel: music (default), record (Jukebox/Note Blocks), master (Master only), or another Minecraft category. Master still affects every channel. GUI changes and /stopsound use this category.",
     "music.enabled": "true enables configured music; false disables it. A blank filename also disables playback.",
     "music.file": "One lowercase .ogg basename, such as boss_music.ogg; no spaces, capitals or paths. Maximum 8 MiB minus 1 KiB, ten minutes. The server validates and sends the compressed track in bounded chunks; slow clients start when it arrives.",

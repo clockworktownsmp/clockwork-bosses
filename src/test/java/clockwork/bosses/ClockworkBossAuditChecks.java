@@ -33,6 +33,7 @@ public final class ClockworkBossAuditChecks {
         checkMediaBoundaries();
         assertions += ClockworkBossSoundDistanceChecks.run();
         assertions += ClockworkBossTemplateSchemaChecks.run();
+        assertions += ClockworkBossSharedMusicChecks.run();
         if (args.length > 0) Files.writeString(Path.of(args[0]),
                 ClockworkBossTemplateDocument.write(ClockworkBossTemplateDocument.defaults()));
         System.out.println("Clockwork Boss audit checks passed: " + assertions + " assertions.");

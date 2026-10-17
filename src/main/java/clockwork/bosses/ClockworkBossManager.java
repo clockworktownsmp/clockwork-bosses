@@ -79,6 +79,21 @@ public final class ClockworkBossManager {
 
     private ClockworkBossManager() {}
 
+    /** Called only on the owning Minecraft thread. A pending restoration has
+     * not compiled its settings yet, so library mutations wait rather than
+     * guessing whether that future encounter needs a track. */
+    public static Map<String, List<String>> sharedMusicReferences() throws java.io.IOException {
+        if (!RESTORING.isEmpty()) throw new java.io.IOException("Boss restoration is pending; retry shared music management when it settles");
+        Map<String, List<String>> result = new java.util.TreeMap<>(); int count = 0;
+        for (var state : ACTIVE.values()) {
+            var music = state.music();
+            if (!music.source().equals("library") || music.file().isEmpty()) continue;
+            if (++count > clockwork.web.SharedMusicLibrary.MAX_RUNNING) throw new java.io.IOException("Loaded shared music references exceed 256");
+            result.computeIfAbsent(music.file(), ignored -> new java.util.ArrayList<>()).add(state.templateName() + ':' + state.uuid());
+        }
+        result.replaceAll((name, references) -> List.copyOf(references)); return Map.copyOf(result);
+    }
+
     /** Command-thread guard prevents removing a config still referenced by a loaded encounter. */
     public static boolean usesTemplate(String name) {
         return ACTIVE.values().stream().anyMatch(state -> state.templateName().equals(name))

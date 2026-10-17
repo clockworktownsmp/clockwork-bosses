@@ -70,6 +70,10 @@ public final class ClockworkBossMediaClient {
                 CustomWardenSkinPayload skin = CustomWardenSkinPayload.CODEC.decode(buffer);
                 if (buffer.isReadable()) throw new IllegalArgumentException("trailing skin payload bytes");
                 WardenSkinTextureCache.acceptCustomSkinPayload(skin.templateName(), skin.fileName(), skin.pngBytes());
+            } else if (kind == ClockworkBossMediaChunk.LIBRARY_MUSIC) {
+                var music = clockwork.bosses.ClockworkBossLibraryMusicData.CODEC.decode(buffer);
+                if (buffer.isReadable()) throw new IllegalArgumentException("trailing library music payload bytes");
+                ClockworkBossMusicClient.accept(music);
             } else if (kind == ClockworkBossMediaChunk.MUSIC) {
                 ClockworkBossMusicData music = ClockworkBossMusicData.CODEC.decode(buffer);
                 if (buffer.isReadable()) throw new IllegalArgumentException("trailing music payload bytes");

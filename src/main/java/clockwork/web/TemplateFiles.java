@@ -37,6 +37,8 @@ public final class TemplateFiles {
     private final SoundBackups soundBackups;
     private final MediaQuota mediaQuota;
     private final Path soundJournals;
+    private final SharedMusicLibrary musicLibrary;
+    public SharedMusicLibrary musicLibrary() { return musicLibrary; }
     private final Map<String, Cached> metadata = new HashMap<>();
     private List<Entry> listing = List.of();
     private long listingExpires;
@@ -56,7 +58,9 @@ public final class TemplateFiles {
         presets = config.resolve("clockwork-bosses/boss-presets").toAbsolutePath().normalize();
         Path soundBackupRoot=config.resolve("clockwork-bosses-web/sound-backups").toAbsolutePath().normalize();
         soundJournals=config.resolve("clockwork-bosses-web/sound-publish-journals").toAbsolutePath().normalize();
-        soundBackups=new SoundBackups(soundBackupRoot);mediaQuota=new MediaQuota(active,drafts,backups,soundBackupRoot,soundJournals);
+        musicLibrary = new SharedMusicLibrary(config, activeWriteLock);
+        soundBackups=new SoundBackups(soundBackupRoot);mediaQuota=new MediaQuota(active,drafts,backups,soundBackupRoot,soundJournals,
+                config.resolve("clockwork-bosses/music"), config.resolve("clockwork-bosses/music-backups"));
         verifyStorage();
     }
     void verifyStorage() throws IOException {
@@ -358,6 +362,8 @@ public final class TemplateFiles {
         if (draft.content() == null) throw new IOException("Save a draft first");
         if (!draft.revision().equals(expectedDraft)) throw new Conflict("Draft changed. Reload before publishing.");
         validator.inspect(draft.content(), true);
+        // The existing 0.2.1 validator above already applied this parser's bounds.
+        var musicCheck = musicLibrary.referenceCheck(TemplateJson.parse(draft.content()));
         Snapshot current = active(name);
         String published = AccessSessions.digest(draft.content());
         boolean replacingJson = !published.equals(current.revision());
@@ -371,6 +377,7 @@ public final class TemplateFiles {
             sounds.verify(media);
             CommitCheck recheck = () -> {
                 authorized.check();
+                musicCheck.check();
                 if (!active(name).revision().equals(current.revision()) || !draft(name).revision().equals(expectedDraft)) throw new Conflict("Template changed during publishing; no replacement was made");
             };
             if (!Files.exists(target.getParent(), NOFOLLOW_LINKS)) {
@@ -418,7 +425,13 @@ public final class TemplateFiles {
         }
     }
     @FunctionalInterface interface CommitCheck { void check() throws IOException; }
+    @FunctionalInterface interface StagedCommitCheck { void check(Path ownedStage) throws IOException; }
     static void atomic(Path target, byte[] bytes, boolean replacing, CommitCheck expected) throws IOException {
+        atomicStaged(target, bytes, replacing, ownedStage -> expected.check());
+    }
+    /** The exact private staging path lets a complete directory revision scan
+     * exclude its own unpublished file, without trusting arbitrary temp names. */
+    static void atomicStaged(Path target, byte[] bytes, boolean replacing, StagedCommitCheck expected) throws IOException {
         check(target); directory(target.getParent());
         Path temporary = Files.createTempFile(target.getParent(), ".workshop-", ".tmp");
         try {
@@ -427,7 +440,7 @@ public final class TemplateFiles {
             }
             check(target);
             if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Workshop write stopped before commit");
-            expected.check();
+            expected.check(temporary);
             if (replacing) Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             else {
                 // Atomic, no-replacement publication. Unlike ATOMIC_MOVE, a hard-link

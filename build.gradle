@@ -160,6 +160,15 @@ check.dependsOn templateTaskChecks
     }
     check.dependsOn taskName
 }
+// Shared music uses the same standalone test classpath and no game process.
+tasks.register('sharedMusicChecks', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'clockwork.web.SharedMusicChecks'
+    args layout.buildDirectory.file('shared-music-checks.json').get().asFile.absolutePath
+}
+check.dependsOn sharedMusicChecks
+
 tasks.register('exportRelayTestClasspath') {
     dependsOn testClasses
     doLast { layout.buildDirectory.file('relay-test-classpath.txt').get().asFile.text = sourceSets.test.runtimeClasspath.asPath }

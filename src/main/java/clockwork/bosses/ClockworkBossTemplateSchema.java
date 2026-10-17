@@ -218,6 +218,9 @@ public final class ClockworkBossTemplateSchema {
             omitted.addProperty("kind", "disabled"); omitted.addProperty("description", "Disable template rewards and keep vanilla drops; null has the same meaning.");
         } else if (path.equals("loot.source")) {
             omitted.addProperty("kind", "value"); omitted.addProperty("value", ClockworkBossLoot.DEFAULT_SOURCE);
+        } else if (path.equals("music.source")) {
+            omitted.addProperty("kind", "value"); omitted.addProperty("value", "template");
+            metadata.addProperty("null_behavior", "Use this template's own sounds folder, never the shared library.");
         } else if (path.equals("boss_bar.player_health") || path.equals("boss_bar.reusable_potion")) {
             omitted.addProperty("kind", "disabled"); omitted.addProperty("description", "Absent sections grant no player support, even though new templates enable it.");
         } else if (path.equals("boss_bar.player_health.enabled") || path.equals("boss_bar.reusable_potion.enabled")) {

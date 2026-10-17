@@ -5,8 +5,18 @@
   "name": "Clockwork Bosses development client keyframe checks",
   "environment": "client",
   "entrypoints": {
-    "client": ["clockwork.bosses.ClockworkBossClientChecks"],
-    "fabric-client-gametest": ["clockwork.bosses.ClockworkBossLootClientGameTest"]
+    "client": [
+      "clockwork.bosses.ClockworkBossClientChecks"
+    ],
+    "fabric-client-gametest": [
+      "clockwork.bosses.ClockworkBossLootClientGameTest",
+      "clockwork.bosses.ClockworkBossSharedMusicClientTest"
+    ]
   },
-  "depends": {"clockwork_bosses": "*"}
+  "depends": {
+    "clockwork_bosses": "*"
+  },
+  "mixins": [
+    "clockwork_bosses.burrow_client_tests.mixins.json"
+  ]
 }

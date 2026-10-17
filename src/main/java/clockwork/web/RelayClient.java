@@ -23,7 +23,7 @@ final class RelayClient implements AutoCloseable {
     private static final String NAME = "[a-z0-9][a-z0-9_-]{0,63}", PRESET = "(?:1_player|[2-6]_players|boss-sounds-example)";
     private static final String MEDIA = "(?:(?:active|drafts)/" + NAME + "|presets/" + PRESET + ")";
     private static final Pattern READ = Pattern.compile("/api/(?:status|session|templates|(?:active|drafts|sounds)/" + NAME + "|sounds/" + MEDIA + "|skins/[A-Za-z0-9_]{1,16}|audio/(?:" + NAME + "|" + MEDIA + ")/(?:sounds|voices)/[a-z0-9][a-z0-9._-]{0,63}\\.ogg)");
-    private static final Set<String> HEADERS = Set.of("Host", "Content-Type", "Content-Length", "Origin", "If-Match", "X-Active-Revision", "X-Workshop-CSRF", "X-Workshop-Preset", "X-Workshop-Draft-Source", "X-Sound-Revision", "X-Sound-Overwrite", "X-Sound-Purpose", "Cookie");
+    private static final Set<String> HEADERS = Set.of("Host", "Content-Type", "Content-Length", "Origin", "If-Match", "X-Active-Revision", "X-Workshop-CSRF", "X-Workshop-Preset", "X-Workshop-Draft-Source", "X-Sound-Revision", "X-Sound-Overwrite", "X-Sound-Purpose", "X-Music-Revision", "X-Music-Impact", "X-Music-Overwrite", "Cookie");
     interface ApiFactory { TemplateApi create() throws IOException; }
     private final URI socketUrl;
     private final RelayIdentity identity;
@@ -74,7 +74,7 @@ final class RelayClient implements AutoCloseable {
             current = connection; connections.add(connection);
             connection.readyTimeout = schedule.schedule(() -> { if (!connection.ready) disconnected(connection); }, 15, TimeUnit.SECONDS);
             try {
-                connection.connecting = http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10)).header("Authorization", "Bearer " + identity.secret()).header("X-Workshop-Media-Sources", "1").header("X-Workshop-Sound-Uploads", "1").header("X-Workshop-Item-Catalog", api.itemCatalogAvailable() ? "1" : "0").buildAsync(socketUrl, connection);
+                connection.connecting = http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10)).header("Authorization", "Bearer " + identity.secret()).header("X-Workshop-Media-Sources", "1").header("X-Workshop-Sound-Uploads", "1").header("X-Workshop-Shared-Music-Library", "1").header("X-Workshop-Item-Catalog", api.itemCatalogAvailable() ? "1" : "0").buildAsync(socketUrl, connection);
                 connection.connecting.whenComplete((socket, error) -> { if (error != null) disconnected(connection); else if (closed || connection.dead) socket.abort(); });
             }
             catch (RuntimeException unavailable) { disconnected(connection); }
@@ -222,12 +222,15 @@ final class RelayClient implements AutoCloseable {
         @Override public void error() { if (!canceled) try { connection.sendError(id); } catch (IOException ignored) { } }
     }
     static boolean routeAllowed(String method, String path) {
+        if (path.equals("/api/music-library")) return method.equals("GET");
+        if (path.matches("/api/music-library/audio/[a-z0-9][a-z0-9._-]{0,63}\\.ogg")) return method.equals("GET") || method.equals("HEAD");
+        if (path.matches("/api/music-library/[a-z0-9][a-z0-9._-]{0,63}\\.ogg/delete")) return method.equals("POST");
         if (method.equals("GET")) return READ.matcher(path).matches() || path.matches(ItemCatalog.ROUTE) || path.matches("/api/draft-audio/"+NAME);
         if (method.equals("HEAD")) return (path.startsWith("/api/audio/") || path.startsWith("/api/active/") || path.startsWith("/api/drafts/")) && READ.matcher(path).matches();
         if (method.equals("POST")) return path.equals("/api/login") || path.equals("/api/logout") || path.matches("/api/publish/[a-z0-9][a-z0-9_-]{0,63}");
         return method.equals("PUT") && (path.matches("/api/drafts/[a-z0-9][a-z0-9_-]{0,63}")||uploadRoute(path));
     }
-    private static boolean uploadRoute(String path){return path.matches("/api/draft-audio/"+NAME+"/(?:sounds|voices)/[a-z0-9][a-z0-9._-]{0,63}\\.ogg");}
+    private static boolean uploadRoute(String path){return path.matches("/api/draft-audio/"+NAME+"/(?:sounds|voices)/[a-z0-9][a-z0-9._-]{0,63}\\.ogg") || path.matches("/api/music-library/[a-z0-9][a-z0-9._-]{0,63}\\.ogg");}
     private static String string(JsonObject object, String key, int limit) throws IOException {
         JsonElement value = object.get(key);
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) throw new IOException("Expected relay string");

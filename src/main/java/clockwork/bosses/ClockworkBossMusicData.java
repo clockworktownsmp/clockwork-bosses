@@ -31,6 +31,7 @@ public record ClockworkBossMusicData(String template, String file,
     /** Identity contains only validated identifiers and a digest, never a client filesystem path. */
     public static boolean isValidKey(String key) {
         if (key == null || key.length() > 216) return false;
+        if (ClockworkBossLibraryMusicData.isValidKey(key)) return true;
         String[] parts = key.split(":", -1);
         return parts.length == 3 && ClockworkBossTemplateNames.isValid(parts[0])
                 && ClockworkBossSoundPayload.isValidFileName(parts[1]) && parts[2].matches("[0-9a-f]{64}");

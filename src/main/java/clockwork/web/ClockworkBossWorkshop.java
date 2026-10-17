@@ -140,6 +140,7 @@ public final class ClockworkBossWorkshop implements DedicatedServerModInitialize
                                 new TemplateJson(ClockworkBossTemplateSchema.write().getBytes(StandardCharsets.UTF_8)),
                                 clockwork.bosses.ClockworkBossTemplateStore.class);
                         else files.verifyStorage();
+                        files.musicLibrary().runningReferences(() -> musicReferences(server));
                         if (!catalogCaptured) {
                             catalogCaptured = true;
                             try { catalog = WorkshopItemSnapshot.capture(server); }
@@ -182,6 +183,21 @@ public final class ClockworkBossWorkshop implements DedicatedServerModInitialize
             pending.cancel(false);
             if (unavailable instanceof InterruptedException) Thread.currentThread().interrupt();
             return false;
+        }
+    }
+    /** The file worker waits briefly for immutable reference strings. Neither
+     * scanning JSON nor hashing/decoding audio runs on Minecraft's thread. */
+    private static java.util.Map<String, java.util.List<String>> musicReferences(MinecraftServer server) throws IOException {
+        if (server.isStopped()) throw new IOException("Server is stopping");
+        if (server.isSameThread()) return clockwork.bosses.ClockworkBossManager.sharedMusicReferences();
+        var pending = server.submit(() -> {
+            try { return clockwork.bosses.ClockworkBossManager.sharedMusicReferences(); }
+            catch (IOException unavailable) { throw new java.util.concurrent.CompletionException(unavailable); }
+        });
+        try { return pending.get(2, TimeUnit.SECONDS); }
+        catch (Exception unavailable) {
+            pending.cancel(false); if (unavailable instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new IOException("Loaded music references unavailable; no global change was made", unavailable);
         }
     }
     /** Only the server-stop hook waits for bounded cancellation; normal reload

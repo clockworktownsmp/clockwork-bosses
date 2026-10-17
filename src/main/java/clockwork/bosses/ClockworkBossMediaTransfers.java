@@ -55,6 +55,9 @@ public final class ClockworkBossMediaTransfers {
             } else if (payload instanceof ClockworkBossMusicData music) {
                 kind = ClockworkBossMediaChunk.MUSIC;
                 ClockworkBossMusicData.CODEC.encode(buffer, music);
+            } else if (payload instanceof ClockworkBossLibraryMusicData music) {
+                kind = ClockworkBossMediaChunk.LIBRARY_MUSIC;
+                ClockworkBossLibraryMusicData.CODEC.encode(buffer, music);
             } else {
                 throw new IllegalArgumentException("Unsupported Clockwork Boss media payload");
             }
@@ -79,7 +82,8 @@ public final class ClockworkBossMediaTransfers {
                                java.util.function.BooleanSupplier replayCached,
                                java.util.function.BooleanSupplier relevant) {
         // Channel negotiation skips clients which do not implement this transport.
-        if (!ServerPlayNetworking.canSend(player, ClockworkBossMediaChunk.TYPE)) return false;
+        if (!ServerPlayNetworking.canSend(player, ClockworkBossMediaChunk.TYPE)
+                || media.kind == ClockworkBossMediaChunk.LIBRARY_MUSIC && !ClockworkBossMusic.supportsSource(player, "library")) return false;
         PlayerTransfers state = PLAYERS.get(player.getUUID());
         if (state == null || state.player != player) {
             state = new PlayerTransfers(player);
@@ -165,6 +169,12 @@ public final class ClockworkBossMediaTransfers {
     /** Four small chunks tolerate latency while keeping a strict 64 KiB send window. */
     private static void fillWindow(PlayerTransfers state) {
         Prepared media = state.current.media;
+        if (media.kind == ClockworkBossMediaChunk.LIBRARY_MUSIC && !ClockworkBossMusic.supportsSource(state.player, "library")) {
+            // Withdrawn library support drops only this optional delivery. Old
+            // tokens/receipts cannot advance a new transfer; the next offset0
+            // or disconnect clears the client's bounded partial assembly.
+            state.current = null; startNext(state); return;
+        }
         while (state.sentThrough < media.bytes.length
                 && state.sentThrough - state.acknowledgedThrough < WINDOW_BYTES) {
             int start = state.sentThrough;

@@ -11,6 +11,28 @@ final class AudioUploadService {
     static com.google.gson.JsonObject capabilities(){var result=new com.google.gson.JsonObject();result.addProperty("enabled",true);result.addProperty("codec","vorbis");result.addProperty("max_file_bytes",UploadedAudio.MUSIC_MAX_BYTES);result.addProperty("max_clip_bytes",UploadedAudio.CLIP_MAX_BYTES);result.addProperty("max_clip_seconds",UploadedAudio.CLIP_MAX_SECONDS);result.addProperty("max_music_seconds",UploadedAudio.MAX_SECONDS);result.addProperty("max_draft_bytes",PresetMedia.MAX_TOTAL_BYTES);result.addProperty("max_storage_bytes",MediaQuota.MAX_STORAGE);result.addProperty("max_files",PresetMedia.MAX_FILES);result.addProperty("uploads_per_minute",12);return result;}
     private final Semaphore slot=new Semaphore(1);
     static final class Busy extends IOException {Busy(){super("Another sound upload is in progress; retry when it finishes");}}
+    /** Shared music competes for the same single bounded decoder/body slot as
+     * template uploads. Relay credits/timeouts still own the input stream. */
+    com.google.gson.JsonObject uploadLibrary(HttpExchange exchange, SharedMusicLibrary library, String filename,
+            String revision, String fileRevision, String impact, boolean overwrite, SharedMusicLibrary.Check authorized) throws IOException {
+        SharedMusicLibrary.filename(filename); TemplateFiles.revision(revision); TemplateFiles.revision(fileRevision); TemplateFiles.revision(impact);
+        if (!slot.tryAcquire()) throw new Busy();
+        try {
+            if (!"audio/ogg".equalsIgnoreCase(exchange.getRequestHeaders().getFirst("Content-Type")))
+                throw new IOException("Upload raw OGG audio with Content-Type audio/ogg");
+            var lengths = exchange.getRequestHeaders().get("Content-Length"); long length;
+            try {
+                if (lengths == null || lengths.size() != 1) throw new NumberFormatException();
+                length = Long.parseLong(lengths.getFirst());
+            } catch (RuntimeException invalid) { throw new IOException("Music Content-Length is required"); }
+            if (length <= 0 || length > UploadedAudio.MUSIC_MAX_BYTES) throw new IOException("Music must be below 8 MiB");
+            authorized.check();
+            byte[] bytes = exchange.getRequestBody().readNBytes(UploadedAudio.MUSIC_MAX_BYTES + 1);
+            if (bytes.length != length) throw new IOException("Music upload was interrupted or has an invalid length");
+            authorized.check();
+            return library.put(filename, bytes, revision, fileRevision, impact, overwrite, authorized);
+        } finally { slot.release(); }
+    }
     TemplateFiles.Snapshot upload(HttpExchange exchange,TemplateFiles files,String name,String kind,String filename,String revision,String fileRevision,TemplateFiles.CommitCheck authorized)throws IOException{
         DraftSounds.relative(kind,filename);TemplateFiles.revision(revision);TemplateFiles.revision(fileRevision);
         if(!slot.tryAcquire())throw new Busy();
